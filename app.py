@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 
-from preprocessing import preprocess_data
+from preprocessing import preprocess_data, validate_input_data
 from anomaly_detection import detect_anomalies
 
 # ============================================================
@@ -31,24 +31,6 @@ def load_demo_data():
     return results, alarms
 
 
-def validate_user_data(df):
-    """
-    Проверяет, подходит ли пользовательский CSV для анализа.
-    """
-
-    required_columns = ["timestamp", "sensor_id", "temperature"]
-
-    missing_columns = [
-        col for col in required_columns
-        if col not in df.columns
-    ]
-
-    if missing_columns:
-        return False, missing_columns
-
-    return True, []
-
-
 st.sidebar.header("📂 Источник данных")
 
 data_source = st.sidebar.radio(
@@ -72,36 +54,17 @@ else:
 
     raw_df = pd.read_csv(uploaded_file)
 
-    is_valid, missing_columns = validate_user_data(raw_df)
-
-    if not is_valid:
-        st.error(
-            f"В файле не хватает обязательных колонок: {missing_columns}"
-        )
-
-        st.markdown(
-            """
-            Файл должен содержать минимум три колонки:
-
-            ```text
-            timestamp, sensor_id, temperature
-            ```
-
-            Пример:
-
-            ```csv
-            timestamp,sensor_id,temperature
-            2026-06-24 10:00:00,T-01,70.5
-            2026-06-24 10:01:00,T-01,70.8
-            2026-06-24 10:02:00,T-01,71.1
-            ```
-            """
-        )
-
+    try:
+        validate_input_data(raw_df)
+        preprocessed_df = preprocess_data(raw_df)
+    except TypeError as error:
+        st.error(f"Некорректный формат входных данных: {error}")
+        st.stop()
+    except ValueError as error:
+        st.error(f"Некорректные данные в CSV: {error}")
         st.stop()
 
     try:
-        preprocessed_df = preprocess_data(raw_df)
         df, alarm_log = detect_anomalies(preprocessed_df)
 
         df["timestamp"] = pd.to_datetime(df["timestamp"])

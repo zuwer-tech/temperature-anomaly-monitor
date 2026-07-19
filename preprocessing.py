@@ -10,6 +10,53 @@ STUCK_MIN_RUN = 10        # сколько подряд одинаковых з�
 STUCK_ABS_TOL = 1e-6       # точное равенство для зависания (ступени квантования не ловим)
 
 
+def validate_input_data(df):
+    """Validate raw temperature data without modifying the input DataFrame."""
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("Input data must be a pandas DataFrame.")
+
+    required_columns = ["timestamp", "sensor_id", "temperature"]
+    missing_columns = [
+        column for column in required_columns if column not in df.columns
+    ]
+    if missing_columns:
+        raise ValueError(
+            "Missing required columns: " + ", ".join(missing_columns)
+        )
+
+    if df.empty:
+        raise ValueError("Input DataFrame must contain at least one row.")
+
+    parsed_timestamps = pd.to_datetime(df["timestamp"], errors="coerce")
+    invalid_timestamp_count = int(parsed_timestamps.isna().sum())
+    if invalid_timestamp_count:
+        raise ValueError(
+            "timestamp contains "
+            f"{invalid_timestamp_count} invalid or missing value(s)."
+        )
+
+    sensor_ids = df["sensor_id"]
+    invalid_sensor_ids = sensor_ids.isna() | sensor_ids.map(
+        lambda value: isinstance(value, str) and not value.strip()
+    )
+    invalid_sensor_id_count = int(invalid_sensor_ids.sum())
+    if invalid_sensor_id_count:
+        raise ValueError(
+            "sensor_id contains "
+            f"{invalid_sensor_id_count} missing or blank value(s)."
+        )
+
+    temperatures = df["temperature"]
+    numeric_temperatures = pd.to_numeric(temperatures, errors="coerce")
+    invalid_temperatures = temperatures.notna() & numeric_temperatures.isna()
+    invalid_temperature_count = int(invalid_temperatures.sum())
+    if invalid_temperature_count:
+        raise ValueError(
+            "temperature contains "
+            f"{invalid_temperature_count} invalid non-numeric value(s)."
+        )
+
+
 def preprocess_data(df, rolling_window=ROLLING_WINDOW):
     """
     Предобработка температурных данных.
@@ -32,6 +79,8 @@ def preprocess_data(df, rolling_window=ROLLING_WINDOW):
     - abs_diff_from_group_mean
     - preliminary_warning
     """
+
+    validate_input_data(df)
 
     df = df.copy()
 

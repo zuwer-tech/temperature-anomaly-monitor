@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 
-from preprocessing import preprocess_data, validate_input_data
+from preprocessing import preprocess_data
 from anomaly_detection import detect_anomalies
 
 # ============================================================
@@ -55,7 +55,6 @@ else:
     raw_df = pd.read_csv(uploaded_file)
 
     try:
-        validate_input_data(raw_df)
         preprocessed_df = preprocess_data(raw_df)
     except TypeError as error:
         st.error(f"Некорректный формат входных данных: {error}")

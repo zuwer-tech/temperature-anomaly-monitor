@@ -11,7 +11,20 @@ STUCK_ABS_TOL = 1e-6       # точное равенство для зависа
 
 
 def validate_input_data(df):
-    """Validate raw temperature data without modifying the input DataFrame."""
+    """Validate raw temperature data before preprocessing.
+
+    Checks the DataFrame type, required columns, row presence, timestamps,
+    sensor identifiers, and numeric-compatible temperature values. The
+    function does not modify the supplied DataFrame.
+
+    Raises
+    ------
+    TypeError
+        If ``df`` is not a pandas DataFrame.
+    ValueError
+        If required data is missing or a timestamp, sensor identifier, or
+        non-missing temperature value is invalid.
+    """
     if not isinstance(df, pd.DataFrame):
         raise TypeError("Input data must be a pandas DataFrame.")
 

@@ -31,9 +31,14 @@
 - Сохраняется: `models/scaler.joblib`, `models/iforest.joblib`,
   `models/model_meta.json`.
 - `detect_anomalies()` загружает сохранённую модель (`transform`/`predict`,
-  без `fit`). Если модели нет — обучается на лету (запасной режим с data
-  leakage и более низкой точностью).
+  без `fit`). Для анализа обязательны оба артефакта: `scaler.joblib` и
+  `iforest.joblib`. Если хотя бы одного из них нет, анализ завершается
+  `ModelNotTrainedError` с командами для предварительного обучения.
 - `contamination` (доля аномалий) по умолчанию 0.04.
+
+Модель должна быть обучена заранее на отдельном штатном baseline. CSV, который
+передан для анализа, используется только для `transform`, `predict` и
+`decision_function`: обучение на нём исказило бы норму и создало data leakage.
 
 ### Аномалия только по ИИ
 
@@ -67,12 +72,17 @@ final_anomaly = (rule_anomaly == 1) | (iforest_anomaly == 1)
 
 ## 5. Обучение
 
-Локально:
+Правильный порядок локального запуска:
 
 ```bash
+python Data.py
 python preprocessing.py
 python train_model.py
+python anomaly_detection.py
 ```
+
+Первые три команды создают baseline, признаки и сохранённые артефакты модели.
+Только после этого четвёртая команда анализирует данные, не переобучая модель.
 
 В Google Colab — `notebooks/train_model_colab.ipynb` (пошагово, для новичков).
 

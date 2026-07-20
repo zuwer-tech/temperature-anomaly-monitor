@@ -59,8 +59,8 @@ streamlit run app.py
  app.py                  Streamlit-дашборд: графики, anomaly score, журнал тревог
 ```
 
-Модель Isolation Forest берётся из папки `models/` (если её там нет — обучается
-на лету как запасной вариант). Чтобы обучить и сохранить модель заранее:
+Модель Isolation Forest берётся из папки `models/`. Для анализа пользовательского
+CSV заранее подготовьте оба артефакта (`scaler.joblib` и `iforest.joblib`):
 
 ```bash
 python preprocessing.py      # synthetic_temperature_data.csv -> preprocessed_temperature_data.csv
@@ -146,9 +146,10 @@ timestamp,sensor_id,temperature
 
 ## Типичные проблемы (troubleshooting)
 
-- **«Модель обучается на лету, а не загружается»** — в `models/` нет
-  `iforest.joblib`. Запустите `python train_model.py`. До этого
-  `detect_anomalies` работает, но точность ниже (data leakage).
+- **«Обученная модель не найдена или комплект артефактов неполный»** — в
+  `models/` нет `scaler.joblib` и/или `iforest.joblib`. Запустите
+  `python preprocessing.py`, затем `python train_model.py`. До обучения анализ
+  пользовательского CSV не запускается, чтобы исключить data leakage.
 - **Реальные данные `Т2.csv` не грузятся в приложение** — у них другая схема
   (`time_s`, `temp_C`, один датчик). Сначала `python data_adapters.py`.
 - **`pytest` не запускается** — установите `requirements-dev.txt`.

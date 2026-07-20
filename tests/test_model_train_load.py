@@ -7,11 +7,15 @@
 - качество модели не хуже базового порога.
 """
 import json
+import hashlib
 
 import numpy as np
+import pytest
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
 
 from preprocessing import preprocess_data
-from anomaly_detection import detect_anomalies
+from anomaly_detection import ModelNotTrainedError, detect_anomalies
 import train_model
 
 
@@ -47,6 +51,81 @@ def test_detect_anomalies_uses_saved_model(preprocessed_synth, tmp_path):
     np.testing.assert_array_equal(
         results["iforest_anomaly"].to_numpy(), expected
     )
+    assert {
+        "iforest_prediction",
+        "iforest_anomaly",
+        "iforest_score_raw",
+        "anomaly_score",
+        "anomaly_score_norm",
+        "final_anomaly",
+    }.issubset(results.columns)
+
+
+def test_missing_model_artifacts_raise_without_creating_files(
+    preprocessed_synth, tmp_path
+):
+    with pytest.raises(ModelNotTrainedError) as exc_info:
+        detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+    message = str(exc_info.value)
+    assert "scaler.joblib" in message
+    assert "iforest.joblib" in message
+    assert "python preprocessing.py" in message
+    assert "python train_model.py" in message
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("existing_name", "missing_name"),
+    [
+        ("scaler.joblib", "iforest.joblib"),
+        ("iforest.joblib", "scaler.joblib"),
+    ],
+)
+def test_incomplete_model_artifacts_report_missing_file(
+    preprocessed_synth, tmp_path, existing_name, missing_name
+):
+    existing_path = tmp_path / existing_name
+    existing_path.write_bytes(b"existing artifact")
+
+    with pytest.raises(ModelNotTrainedError) as exc_info:
+        detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+    assert missing_name in str(exc_info.value)
+    assert existing_path.read_bytes() == b"existing artifact"
+    assert sorted(path.name for path in tmp_path.iterdir()) == [existing_name]
+
+
+def test_inference_never_calls_fit(preprocessed_synth, tmp_path, monkeypatch):
+    scaler, model, info = train_model.train(preprocessed_synth)
+    train_model.save_model(scaler, model, info, model_dir=str(tmp_path))
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("fit methods must not run during inference")
+
+    monkeypatch.setattr(StandardScaler, "fit", fail_if_called)
+    monkeypatch.setattr(StandardScaler, "fit_transform", fail_if_called)
+    monkeypatch.setattr(IsolationForest, "fit", fail_if_called)
+
+    detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+
+def test_inference_does_not_modify_model_artifacts(preprocessed_synth, tmp_path):
+    scaler, model, info = train_model.train(preprocessed_synth)
+    train_model.save_model(scaler, model, info, model_dir=str(tmp_path))
+    artifact_paths = [tmp_path / "scaler.joblib", tmp_path / "iforest.joblib"]
+    hashes_before = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in artifact_paths
+    }
+
+    detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+    hashes_after = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in artifact_paths
+    }
+    assert hashes_after == hashes_before
 
 
 def test_model_quality_floor(preprocessed_synth):

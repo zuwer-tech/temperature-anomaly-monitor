@@ -1,11 +1,14 @@
 import os
+import sys
 
 import pandas as pd
 import numpy as np
 
 from joblib import load
-from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import StandardScaler
+
+
+class ModelNotTrainedError(RuntimeError):
+    """Обученная модель отсутствует или сохранена не полностью."""
 
 
 # Единое место настройки порогов правил. Меняйте значения здесь, а не в теле
@@ -35,37 +38,30 @@ def _rolling_slope(series, window):
 
 
 def _load_or_fit_iforest(X, model_dir="models"):
-    """Возвращает (X_scaled, predictions, score_raw, used_saved_model).
-
-    Если в model_dir есть обученная модель (scaler.joblib + iforest.joblib,
-    см. train_model.py) — используется она: только transform/predict, без fit.
-    Это и есть работа с обученной моделью без data leakage.
-
-    Иначе — fallback: модель обучается на лету на тех же данных, что оценивает.
-    Так приложение остаётся рабочим для пользовательских CSV без обученной
-    модели, но для демонстрационных/проектных данных лучше заранее запустить
-    train_model.py.
-    """
+    """Загружает модель и возвращает результаты инференса без переобучения."""
     path_scaler = os.path.join(model_dir, "scaler.joblib")
     path_model = os.path.join(model_dir, "iforest.joblib")
-    if os.path.exists(path_scaler) and os.path.exists(path_model):
-        scaler = load(path_scaler)
-        model = load(path_model)
-        X_scaled = scaler.transform(X)
-        predictions = model.predict(X_scaled)
-        score_raw = model.decision_function(X_scaled)
-        return X_scaled, predictions, score_raw, True
+    artifacts = {
+        "scaler.joblib": path_scaler,
+        "iforest.joblib": path_model,
+    }
+    missing = [name for name, path in artifacts.items() if not os.path.isfile(path)]
 
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    model = IsolationForest(
-        n_estimators=200,
-        contamination=0.08,
-        random_state=42
-    ).fit(X_scaled)
+    if missing:
+        raise ModelNotTrainedError(
+            "Обученная модель Isolation Forest не найдена или комплект "
+            "артефактов неполный. Отсутствуют файлы: "
+            f"{', '.join(missing)}. Сначала выполните:\n"
+            "python preprocessing.py\n"
+            "python train_model.py"
+        )
+
+    scaler = load(path_scaler)
+    model = load(path_model)
+    X_scaled = scaler.transform(X)
     predictions = model.predict(X_scaled)
     score_raw = model.decision_function(X_scaled)
-    return X_scaled, predictions, score_raw, False
+    return X_scaled, predictions, score_raw, True
 
 
 def detect_anomalies(df, model_dir="models"):
@@ -297,7 +293,11 @@ if __name__ == "__main__":
 
     df = pd.read_csv(input_file)
 
-    results_df, alarm_log = detect_anomalies(df)
+    try:
+        results_df, alarm_log = detect_anomalies(df)
+    except ModelNotTrainedError as error:
+        print(f"Ошибка: {error}", file=sys.stderr)
+        raise SystemExit(1) from None
 
     results_df.to_csv(results_file, index=False, encoding="utf-8-sig")
     alarm_log.to_csv(alarm_log_file, index=False, encoding="utf-8-sig")

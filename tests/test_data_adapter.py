@@ -20,14 +20,17 @@ def test_load_t2_real_file():
     assert (df["scenario"] == "user_data").all()
 
 
-def test_load_t2_runs_through_pipeline():
+def test_load_t2_runs_through_pipeline(tmp_path, preprocessed_synth):
     """Реальные данные проходят предобработку и детекцию без ошибок."""
     from preprocessing import preprocess_data
     from anomaly_detection import detect_anomalies
+    import train_model
 
     df = load_t2("Т2.csv")
     pre = preprocess_data(df)
-    results, alarm_log = detect_anomalies(pre)
+    scaler, model, info = train_model.train(preprocessed_synth)
+    train_model.save_model(scaler, model, info, model_dir=str(tmp_path))
+    results, alarm_log = detect_anomalies(pre, model_dir=str(tmp_path))
     assert len(results) == len(df)
     assert "final_anomaly" in results.columns
     # Журнал тревог содержит только колонки, которые отображает приложение.

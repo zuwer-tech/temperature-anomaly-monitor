@@ -3,7 +3,7 @@ import streamlit as st
 import plotly.express as px
 
 from preprocessing import preprocess_data
-from anomaly_detection import detect_anomalies
+from anomaly_detection import ModelNotTrainedError, detect_anomalies
 
 # ============================================================
 # 1. НАСТРОЙКИ СТРАНИЦЫ
@@ -71,6 +71,11 @@ else:
 
         st.sidebar.success("CSV успешно загружен и проанализирован.")
 
+    except ModelNotTrainedError as error:
+        st.error(str(error))
+        st.info("Подготовьте данные и заранее обучите модель:")
+        st.code("python preprocessing.py\npython train_model.py", language="bash")
+        st.stop()
     except Exception as error:
         st.error("Во время анализа файла произошла ошибка.")
         st.exception(error)

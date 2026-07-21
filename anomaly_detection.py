@@ -17,6 +17,9 @@ class ModelNotTrainedError(RuntimeError):
 class ModelCompatibilityError(RuntimeError):
     """Сохранённая модель повреждена или несовместима с текущим кодом."""
 
+ANALYSIS_MODE_RULES_ONLY = "rules-only"
+ANALYSIS_MODE_RULES_ML = "rules+ML"
+
 
 REQUIRED_METADATA_FIELDS = (
     "feature_columns",
@@ -178,7 +181,7 @@ def _load_or_fit_iforest(X, model_dir="models"):
     return X_scaled, predictions, score_raw, True
 
 
-def detect_anomalies(df, model_dir="models"):
+def detect_anomalies(df, model_dir="models", use_ml=True):
     """
     Обнаружение температурных аномалий.
 
@@ -186,6 +189,9 @@ def detect_anomalies(df, model_dir="models"):
     На выход возвращает:
     - df с результатами анализа
     - alarm_log с журналом тревог
+
+    use_ml=False явно включает режим только инженерных правил. Автоматического
+    перехода в этот режим при ошибке модели нет.
     """
 
     df = df.copy()
@@ -284,29 +290,41 @@ def detect_anomalies(df, model_dir="models"):
     # 2. ISOLATION FOREST
     # ============================================================
 
-    X = df[list(FEATURE_COLUMNS)].replace([np.inf, -np.inf], np.nan).fillna(0)
+    if use_ml:
+        X = df[list(FEATURE_COLUMNS)].replace(
+            [np.inf, -np.inf], np.nan
+        ).fillna(0)
 
-    X_scaled, iforest_prediction, iforest_score_raw, _used_saved = (
-        _load_or_fit_iforest(X, model_dir=model_dir)
-    )
-
-    df["iforest_prediction"] = iforest_prediction
-    df["iforest_anomaly"] = (df["iforest_prediction"] == -1).astype(int)
-
-    df["iforest_score_raw"] = iforest_score_raw
-    df["anomaly_score"] = -df["iforest_score_raw"]
-
-    min_score = df["anomaly_score"].min()
-    max_score = df["anomaly_score"].max()
-
-    if max_score != min_score:
-        df["anomaly_score_norm"] = (
-            (df["anomaly_score"] - min_score) / (max_score - min_score)
+        _X_scaled, iforest_prediction, iforest_score_raw, _used_saved = (
+            _load_or_fit_iforest(X, model_dir=model_dir)
         )
-    else:
-        df["anomaly_score_norm"] = 0
 
-    df["anomaly_score_norm"] = df["anomaly_score_norm"].fillna(0)
+        df["iforest_prediction"] = iforest_prediction
+        df["iforest_anomaly"] = (df["iforest_prediction"] == -1).astype(int)
+        df["iforest_score_raw"] = iforest_score_raw
+        df["anomaly_score"] = -df["iforest_score_raw"]
+
+        min_score = df["anomaly_score"].min()
+        max_score = df["anomaly_score"].max()
+
+        if max_score != min_score:
+            df["anomaly_score_norm"] = (
+                (df["anomaly_score"] - min_score) / (max_score - min_score)
+            )
+        else:
+            df["anomaly_score_norm"] = 0
+
+        df["anomaly_score_norm"] = df["anomaly_score_norm"].fillna(0)
+        analysis_mode = ANALYSIS_MODE_RULES_ML
+    else:
+        df["iforest_prediction"] = np.nan
+        df["iforest_anomaly"] = 0
+        df["iforest_score_raw"] = np.nan
+        df["anomaly_score"] = np.nan
+        df["anomaly_score_norm"] = np.nan
+        analysis_mode = ANALYSIS_MODE_RULES_ONLY
+
+    df["analysis_mode"] = analysis_mode
 
     # ============================================================
     # 3. ОБЪЕДИНЕНИЕ ПРАВИЛ И ИИ
@@ -364,7 +382,8 @@ def detect_anomalies(df, model_dir="models"):
             "rule_risk_level",
             "anomaly_score_norm",
             "rule_recommendation",
-            "scenario"
+            "scenario",
+            "analysis_mode",
         ]
     ]
 
@@ -377,7 +396,8 @@ def detect_anomalies(df, model_dir="models"):
         "rule_risk_level": "Уровень",
         "anomaly_score_norm": "Anomaly_score",
         "rule_recommendation": "Рекомендация",
-        "scenario": "Истинный_сценарий"
+        "scenario": "Истинный_сценарий",
+        "analysis_mode": "Режим_анализа",
     })
 
     alarm_log["Температура"] = alarm_log["Температура"].round(2)

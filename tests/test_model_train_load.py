@@ -16,6 +16,8 @@ from joblib import dump
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
+import anomaly_detection
+import model_schema
 from preprocessing import preprocess_data
 from anomaly_detection import (
     FEATURE_COLUMNS,
@@ -77,7 +79,7 @@ class ModelWithoutDecisionFunction:
 def _valid_metadata():
     return {
         "metadata_version": 1,
-        "feature_columns": FEATURE_COLUMNS.copy(),
+        "feature_columns": list(FEATURE_COLUMNS),
         "contamination": 0.04,
         "random_state": 42,
         "n_estimators": 200,
@@ -89,6 +91,29 @@ def _valid_metadata():
         "evaluation_normal_rows": 3,
         "evaluation_anomaly_rows": 2,
     }
+
+
+def test_model_schema_is_shared_and_has_expected_order():
+    expected = (
+        "temperature_filled",
+        "rolling_mean",
+        "rolling_std",
+        "temp_diff",
+        "abs_temp_diff",
+        "abs_z_score",
+        "is_missing",
+        "is_stuck",
+        "abs_diff_from_group_mean",
+        "rolling_temp_diff_mean_20",
+    )
+
+    assert isinstance(model_schema.FEATURE_COLUMNS, tuple)
+    assert model_schema.FEATURE_COLUMNS == expected
+    assert len(model_schema.FEATURE_COLUMNS) == 10
+    assert train_model.FEATURE_COLUMNS is model_schema.FEATURE_COLUMNS
+    assert anomaly_detection.FEATURE_COLUMNS is model_schema.FEATURE_COLUMNS
+    assert train_model.METADATA_VERSION is model_schema.METADATA_VERSION
+    assert anomaly_detection.METADATA_VERSION is model_schema.METADATA_VERSION
 
 
 def _write_bundle(tmp_path, metadata=None, scaler=None, model=None):
@@ -300,9 +325,9 @@ def test_metadata_requires_feature_columns(preprocessed_synth, tmp_path):
     "feature_columns",
     [
         "not-a-list",
-        FEATURE_COLUMNS[:-1],
-        FEATURE_COLUMNS + ["extra_feature"],
-        FEATURE_COLUMNS[::-1],
+        list(FEATURE_COLUMNS[:-1]),
+        [*FEATURE_COLUMNS, "extra_feature"],
+        list(FEATURE_COLUMNS[::-1]),
     ],
     ids=("not-list", "missing-feature", "extra-feature", "changed-order"),
 )
@@ -499,8 +524,9 @@ def test_meta_json_written(preprocessed_synth, tmp_path):
     train_model.save_model(scaler, model, info, model_dir=str(tmp_path))
     with open(tmp_path / "model_meta.json", encoding="utf-8") as fh:
         meta = json.load(fh)
-    assert meta["metadata_version"] == 1
-    assert meta["feature_columns"] == train_model.FEATURE_COLUMNS
+    assert meta["metadata_version"] == model_schema.METADATA_VERSION
+    assert isinstance(meta["feature_columns"], list)
+    assert meta["feature_columns"] == list(model_schema.FEATURE_COLUMNS)
     assert meta["trained_on_normal"] is True
     expected_fields = {
         "metadata_version",

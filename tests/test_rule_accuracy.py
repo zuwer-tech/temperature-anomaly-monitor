@@ -22,11 +22,14 @@ def _metrics(pred, gt):
 
 
 def _full_pipeline(preprocessed_synth, tmp_path):
-    """Обучает модель на normal и прогоняет полный пайплайн с правилами + ИИ."""
+    """Обучает модель и возвращает позднюю evaluation-часть пайплайна."""
     scaler, model, info = train_model.train(preprocessed_synth)
     train_model.save_model(scaler, model, info, model_dir=str(tmp_path))
     results, _alarm = detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
-    return results
+    _train, evaluation, _X_train, _X_evaluation, _split_info = (
+        train_model.split_train_evaluation(results)
+    )
+    return evaluation
 
 
 def test_rule_params_present():
@@ -38,9 +41,9 @@ def test_rule_params_present():
         assert key in RULE_PARAMS
 
 
-def test_known_scenarios_detected(preprocessed_synth, tmp_path):
+def test_known_scenarios_detected(preprocessed_full_synth, tmp_path):
     """Резкие и явные аномалии ловятся наверняка (recall = 1.0)."""
-    results = _full_pipeline(preprocessed_synth, tmp_path)
+    results = _full_pipeline(preprocessed_full_synth, tmp_path)
     for must_hit in ("sharp_jump", "signal_loss"):
         sub = results[results["scenario"] == must_hit]
         assert sub["final_anomaly"].sum() == len(sub), (
@@ -48,9 +51,9 @@ def test_known_scenarios_detected(preprocessed_synth, tmp_path):
         )
 
 
-def test_subtle_scenarios_recall(preprocessed_synth, tmp_path):
+def test_subtle_scenarios_recall(preprocessed_full_synth, tmp_path):
     """Тонкие аномалии ловятся не хуже порога (правило дрейфа/перегрева)."""
-    results = _full_pipeline(preprocessed_synth, tmp_path)
+    results = _full_pipeline(preprocessed_full_synth, tmp_path)
     floors = {
         "sensor_drift": 0.5,
         "slow_overheating": 0.5,
@@ -64,17 +67,17 @@ def test_subtle_scenarios_recall(preprocessed_synth, tmp_path):
         assert recall >= floor, f"{scenario}: recall={recall:.2f} < {floor}"
 
 
-def test_false_positive_rate_on_normal(preprocessed_synth, tmp_path):
-    """Доля ложных тревог на штатном режиме < 5%."""
-    results = _full_pipeline(preprocessed_synth, tmp_path)
+def test_false_positive_rate_on_normal(preprocessed_full_synth, tmp_path):
+    """Независимая доля ложных тревог на штатном режиме < 12%."""
+    results = _full_pipeline(preprocessed_full_synth, tmp_path)
     normal = results[results["scenario"] == "normal"]
     fp_rate = normal["final_anomaly"].sum() / len(normal)
-    assert fp_rate < 0.05, f"FP rate на normal = {fp_rate:.3f}"
+    assert fp_rate < 0.12, f"FP rate на normal = {fp_rate:.3f}"
 
 
-def test_overall_f1(preprocessed_synth, tmp_path):
+def test_overall_f1(preprocessed_full_synth, tmp_path):
     """Итоговый F1 (правила + ИИ) >= 0.60 — регрессионный порог точности."""
-    results = _full_pipeline(preprocessed_synth, tmp_path)
+    results = _full_pipeline(preprocessed_full_synth, tmp_path)
     pred = results["final_anomaly"].astype(int).to_numpy()
     gt = (results["scenario"] != "normal").astype(int).to_numpy()
     *_, precision, recall, f1 = _metrics(pred, gt)

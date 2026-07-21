@@ -5,6 +5,8 @@
 plt.show), чтобы тесты были быстрыми, детерминированными и независимыми от
 больших закоммиченных артефактов.
 """
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -52,9 +54,9 @@ def make_synth_df(n=300, num_sensors=6, seed=42):
             scen[180:220] = "stuck_sensor"
 
         if sid == "T-06":
-            temp[80:120] += rng.normal(0, 5, 40)
-            scen[80:120] = "high_noise"
-            miss = np.random.choice(np.arange(80, 120), size=8, replace=False)
+            temp[120:160] += rng.normal(0, 5, 40)
+            scen[120:160] = "high_noise"
+            miss = rng.choice(np.arange(120, 160), size=8, replace=False)
             temp[miss] = np.nan
             scen[miss] = "signal_loss"
 
@@ -80,3 +82,13 @@ def preprocessed_synth(synth_df):
     """Синтетический набор после preprocess_data."""
     from preprocessing import preprocess_data
     return preprocess_data(synth_df)
+
+
+@pytest.fixture(scope="session")
+def preprocessed_full_synth():
+    """Полный текущий benchmark из synthetic_temperature_data.csv."""
+    from preprocessing import preprocess_data
+
+    repo_root = Path(__file__).resolve().parents[1]
+    raw = pd.read_csv(repo_root / "synthetic_temperature_data.csv")
+    return preprocess_data(raw)

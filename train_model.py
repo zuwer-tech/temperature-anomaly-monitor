@@ -50,6 +50,8 @@ DEFAULT_INPUT = "preprocessed_temperature_data.csv"
 DEFAULT_CONTAMINATION = 0.04
 RANDOM_STATE = 42
 N_ESTIMATORS = 200
+TEST_START = "2026-06-06 14:00:00"
+SPLIT_STRATEGY = "time"
 
 
 def prepare_features(df):
@@ -89,15 +91,69 @@ def _normal_mask(df):
     return pd.Series(True, index=df.index), False
 
 
+def split_train_evaluation(df, test_start=TEST_START):
+    """Готовит признаки и делит данные на ранний train и поздний evaluation.
+
+    Признаки рассчитываются до применения масок, поэтому первые строки
+    evaluation используют доступную прошлую rolling-историю train. В train
+    попадают только normal-строки до фиксированной временной границы.
+
+    Возвращает ``(train_df, evaluation_df, X_train, X_evaluation, info)``.
+    """
+    prepared_df, X = prepare_features(df)
+    boundary = pd.Timestamp(test_start)
+    normal_mask, used_normal = _normal_mask(prepared_df)
+    train_mask = (prepared_df["timestamp"] < boundary) & normal_mask
+    evaluation_mask = prepared_df["timestamp"] >= boundary
+
+    if not train_mask.any():
+        raise ValueError(
+            "В train нет строк до временной границы "
+            f"{boundary.isoformat()}."
+        )
+    if not evaluation_mask.any():
+        raise ValueError(
+            "В evaluation нет строк начиная с временной границы "
+            f"{boundary.isoformat()}."
+        )
+
+    train_df = prepared_df.loc[train_mask].copy()
+    evaluation_df = prepared_df.loc[evaluation_mask].copy()
+    X_train = X.loc[train_mask].copy()
+    X_evaluation = X.loc[evaluation_mask].copy()
+
+    if "scenario" in evaluation_df.columns:
+        evaluation_normal_rows = int(
+            (evaluation_df["scenario"] == "normal").sum()
+        )
+        evaluation_anomaly_rows = int(
+            (evaluation_df["scenario"] != "normal").sum()
+        )
+    else:
+        evaluation_normal_rows = 0
+        evaluation_anomaly_rows = 0
+
+    info = {
+        "train_rows": int(len(train_df)),
+        "trained_on_normal": used_normal,
+        "split_strategy": SPLIT_STRATEGY,
+        "test_start": boundary.isoformat(),
+        "evaluation_rows": int(len(evaluation_df)),
+        "evaluation_normal_rows": evaluation_normal_rows,
+        "evaluation_anomaly_rows": evaluation_anomaly_rows,
+    }
+    return train_df, evaluation_df, X_train, X_evaluation, info
+
+
 def train(df, contamination=DEFAULT_CONTAMINATION, random_state=RANDOM_STATE):
-    """Обучает scaler+IsolationForest на штатном режиме.
+    """Обучает scaler+IsolationForest на раннем штатном режиме.
 
     Возвращает (scaler, model, info) где info — словарь с числом train-строк и
-    флагом, обучалась ли модель именно на `normal`.
+    сведениями о временном разбиении.
     """
-    df, X = prepare_features(df)
-    train_mask, used_normal = _normal_mask(df)
-    X_train = X.loc[train_mask]
+    _train_df, _evaluation_df, X_train, _X_evaluation, info = (
+        split_train_evaluation(df)
+    )
 
     scaler = StandardScaler().fit(X_train)
     model = IsolationForest(
@@ -106,18 +162,30 @@ def train(df, contamination=DEFAULT_CONTAMINATION, random_state=RANDOM_STATE):
         random_state=random_state,
     ).fit(scaler.transform(X_train))
 
-    info = {"train_rows": int(train_mask.sum()), "trained_on_normal": used_normal}
     return scaler, model, info
 
 
 def evaluate(df, scaler, model):
-    """Считает precision/recall/F1 модели против scenario!='normal' и per-scenario recall."""
-    df, X = prepare_features(df)
-    pred = (model.predict(scaler.transform(X)) == -1).astype(int)
-    report = {"iforest_anomalies": int(pred.sum())}
-    if "scenario" not in df.columns:
+    """Считает метрики только на более поздней evaluation-части."""
+    _train_df, evaluation_df, _X_train, X_evaluation, split_info = (
+        split_train_evaluation(df)
+    )
+    pred = pd.Series(
+        (model.predict(scaler.transform(X_evaluation)) == -1).astype(int),
+        index=evaluation_df.index,
+    )
+    report = {
+        "iforest_anomalies": int(pred.sum()),
+        "train_rows": split_info["train_rows"],
+        "evaluation_rows": split_info["evaluation_rows"],
+        "evaluation_normal_rows": split_info["evaluation_normal_rows"],
+        "evaluation_anomaly_rows": split_info["evaluation_anomaly_rows"],
+        "split_strategy": split_info["split_strategy"],
+        "test_start": split_info["test_start"],
+    }
+    if "scenario" not in evaluation_df.columns:
         return report
-    gt = (df["scenario"] != "normal").astype(int)
+    gt = (evaluation_df["scenario"] != "normal").astype(int)
     tp = int(((pred == 1) & (gt == 1)).sum())
     fp = int(((pred == 1) & (gt == 0)).sum())
     fn = int(((pred == 0) & (gt == 1)).sum())
@@ -131,8 +199,8 @@ def evaluate(df, scaler, model):
         "f1": round(f1, 4),
     })
     per_scenario = {}
-    for scenario, sub in df.groupby("scenario"):
-        sp = pred[sub.index]
+    for scenario, sub in evaluation_df.groupby("scenario"):
+        sp = pred.loc[sub.index]
         total = int(len(sub))
         detected = int(sp.sum())
         per_scenario[scenario] = {
@@ -155,6 +223,11 @@ def save_model(scaler, model, info, model_dir=MODEL_DIR, contamination=DEFAULT_C
         "n_estimators": N_ESTIMATORS,
         "train_rows": info["train_rows"],
         "trained_on_normal": info["trained_on_normal"],
+        "split_strategy": info["split_strategy"],
+        "test_start": info["test_start"],
+        "evaluation_rows": info["evaluation_rows"],
+        "evaluation_normal_rows": info["evaluation_normal_rows"],
+        "evaluation_anomaly_rows": info["evaluation_anomaly_rows"],
     }
     with open(os.path.join(model_dir, "model_meta.json"), "w", encoding="utf-8") as fh:
         json.dump(meta, fh, ensure_ascii=False, indent=2)
@@ -165,8 +238,17 @@ def main(input_file=DEFAULT_INPUT, contamination=DEFAULT_CONTAMINATION):
     scaler, model, info = train(df, contamination=contamination)
     save_model(scaler, model, info, contamination=contamination)
     report = evaluate(df, scaler, model)
-    print("Модель обучена. train_rows =", info["train_rows"],
-          "| trained_on_normal =", info["trained_on_normal"])
+    print("Модель обучена.")
+    for key in (
+        "train_rows",
+        "evaluation_rows",
+        "evaluation_normal_rows",
+        "evaluation_anomaly_rows",
+        "split_strategy",
+        "test_start",
+        "trained_on_normal",
+    ):
+        print(f"{key} = {info[key]}")
     print("Артефакты сохранены в:", MODEL_DIR)
     print("Отчёт по качеству (Isolation Forest):")
     print(json.dumps(report, ensure_ascii=False, indent=2))

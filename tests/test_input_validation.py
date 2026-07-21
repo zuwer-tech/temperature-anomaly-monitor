@@ -173,3 +173,36 @@ def test_validation_does_not_modify_dataframe():
     validate_input_data(df)
 
     assert_frame_equal(df, original)
+
+
+def test_time_diff_seconds_is_calculated_per_sensor_after_sorting():
+    df = pd.DataFrame(
+        {
+            "timestamp": [
+                "2026-01-01 00:10:00",
+                "2026-01-01 00:00:00",
+                "2026-01-01 00:02:00",
+                "2026-01-01 00:00:30",
+                "2026-01-01 00:02:00",
+            ],
+            "sensor_id": ["T-02", "T-01", "T-02", "T-01", "T-01"],
+            "temperature": [80.0, 70.0, 79.0, 71.0, 72.0],
+        }
+    )
+
+    result = preprocess_data(df)
+    sensor_1 = result[result["sensor_id"] == "T-01"]
+    sensor_2 = result[result["sensor_id"] == "T-02"]
+
+    assert sensor_1["timestamp"].is_monotonic_increasing
+    assert sensor_2["timestamp"].is_monotonic_increasing
+    np.testing.assert_allclose(
+        sensor_1["time_diff_seconds"],
+        [np.nan, 30.0, 90.0],
+        equal_nan=True,
+    )
+    np.testing.assert_allclose(
+        sensor_2["time_diff_seconds"],
+        [np.nan, 480.0],
+        equal_nan=True,
+    )

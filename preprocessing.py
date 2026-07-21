@@ -85,6 +85,7 @@ def preprocess_data(df, rolling_window=ROLLING_WINDOW):
     - rolling_mean
     - rolling_std
     - temp_diff
+    - time_diff_seconds
     - abs_temp_diff
     - z_score
     - abs_z_score
@@ -109,6 +110,14 @@ def preprocess_data(df, rolling_window=ROLLING_WINDOW):
 
     # Сортируем данные по датчику и времени
     df = df.sort_values(by=["sensor_id", "timestamp"]).reset_index(drop=True)
+
+    # Фактический интервал между соседними измерениями каждого датчика.
+    # Для первой точки датчика интервал неизвестен и остаётся NaN.
+    df["time_diff_seconds"] = (
+        df.groupby("sensor_id")["timestamp"]
+        .diff()
+        .dt.total_seconds()
+    )
 
     # Признак пропуска сигнала
     df["is_missing"] = df["temperature"].isna().astype(int)

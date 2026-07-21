@@ -12,11 +12,17 @@ import hashlib
 import numpy as np
 import pandas as pd
 import pytest
+from joblib import dump
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
 from preprocessing import preprocess_data
-from anomaly_detection import ModelNotTrainedError, detect_anomalies
+from anomaly_detection import (
+    FEATURE_COLUMNS,
+    ModelCompatibilityError,
+    ModelNotTrainedError,
+    detect_anomalies,
+)
 import train_model
 
 
@@ -29,6 +35,67 @@ ANOMALY_SCENARIOS = {
     "signal_loss",
     "correlated_growth",
 }
+
+
+class StubScaler:
+    n_features_in_ = len(FEATURE_COLUMNS)
+    transform_calls = 0
+
+    def transform(self, X):
+        type(self).transform_calls += 1
+        return np.asarray(X)
+
+
+class StubModel:
+    n_features_in_ = len(FEATURE_COLUMNS)
+    predict_calls = 0
+    decision_function_calls = 0
+
+    def predict(self, X):
+        type(self).predict_calls += 1
+        return np.ones(len(X), dtype=int)
+
+    def decision_function(self, X):
+        type(self).decision_function_calls += 1
+        return np.zeros(len(X), dtype=float)
+
+
+class ModelWithoutPredict:
+    n_features_in_ = len(FEATURE_COLUMNS)
+
+    def decision_function(self, X):
+        return np.zeros(len(X), dtype=float)
+
+
+class ModelWithoutDecisionFunction:
+    n_features_in_ = len(FEATURE_COLUMNS)
+
+    def predict(self, X):
+        return np.ones(len(X), dtype=int)
+
+
+def _valid_metadata():
+    return {
+        "metadata_version": 1,
+        "feature_columns": FEATURE_COLUMNS.copy(),
+        "contamination": 0.04,
+        "random_state": 42,
+        "n_estimators": 200,
+        "train_rows": 10,
+        "trained_on_normal": True,
+        "split_strategy": "time",
+        "test_start": "2026-01-01T00:00:00",
+        "evaluation_rows": 5,
+        "evaluation_normal_rows": 3,
+        "evaluation_anomaly_rows": 2,
+    }
+
+
+def _write_bundle(tmp_path, metadata=None, scaler=None, model=None):
+    dump(StubScaler() if scaler is None else scaler, tmp_path / "scaler.joblib")
+    dump(StubModel() if model is None else model, tmp_path / "iforest.joblib")
+    with open(tmp_path / "model_meta.json", "w", encoding="utf-8") as fh:
+        json.dump(_valid_metadata() if metadata is None else metadata, fh)
 
 
 def test_train_uses_normal_only(preprocessed_synth):
@@ -167,32 +234,197 @@ def test_missing_model_artifacts_raise_without_creating_files(
         detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
 
     message = str(exc_info.value)
-    assert "scaler.joblib" in message
-    assert "iforest.joblib" in message
+    expected_names = ("scaler.joblib", "iforest.joblib", "model_meta.json")
+    assert all(name in message for name in expected_names)
+    assert [message.index(name) for name in expected_names] == sorted(
+        message.index(name) for name in expected_names
+    )
     assert "python preprocessing.py" in message
     assert "python train_model.py" in message
     assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.parametrize(
-    ("existing_name", "missing_name"),
+    "missing_name",
     [
-        ("scaler.joblib", "iforest.joblib"),
-        ("iforest.joblib", "scaler.joblib"),
+        "scaler.joblib",
+        "iforest.joblib",
+        "model_meta.json",
     ],
 )
 def test_incomplete_model_artifacts_report_missing_file(
-    preprocessed_synth, tmp_path, existing_name, missing_name
+    preprocessed_synth, tmp_path, missing_name
 ):
-    existing_path = tmp_path / existing_name
-    existing_path.write_bytes(b"existing artifact")
+    artifact_names = ("scaler.joblib", "iforest.joblib", "model_meta.json")
+    for name in artifact_names:
+        if name != missing_name:
+            (tmp_path / name).write_bytes(b"existing artifact")
 
     with pytest.raises(ModelNotTrainedError) as exc_info:
         detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
 
     assert missing_name in str(exc_info.value)
-    assert existing_path.read_bytes() == b"existing artifact"
-    assert sorted(path.name for path in tmp_path.iterdir()) == [existing_name]
+    assert sorted(path.name for path in tmp_path.iterdir()) == sorted(
+        name for name in artifact_names if name != missing_name
+    )
+    assert all(path.read_bytes() == b"existing artifact" for path in tmp_path.iterdir())
+
+
+def test_corrupted_metadata_json_raises_compatibility_error(
+    preprocessed_synth, tmp_path
+):
+    _write_bundle(tmp_path)
+    (tmp_path / "model_meta.json").write_text("{broken", encoding="utf-8")
+
+    with pytest.raises(ModelCompatibilityError, match="model_meta.json"):
+        detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+
+def test_metadata_top_level_must_be_object(preprocessed_synth, tmp_path):
+    _write_bundle(tmp_path, metadata=[])
+
+    with pytest.raises(ModelCompatibilityError, match="JSON-объект"):
+        detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+
+def test_metadata_requires_feature_columns(preprocessed_synth, tmp_path):
+    metadata = _valid_metadata()
+    del metadata["feature_columns"]
+    _write_bundle(tmp_path, metadata=metadata)
+
+    with pytest.raises(ModelCompatibilityError, match="feature_columns"):
+        detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "feature_columns",
+    [
+        "not-a-list",
+        FEATURE_COLUMNS[:-1],
+        FEATURE_COLUMNS + ["extra_feature"],
+        FEATURE_COLUMNS[::-1],
+    ],
+    ids=("not-list", "missing-feature", "extra-feature", "changed-order"),
+)
+def test_metadata_feature_columns_must_match_exactly(
+    preprocessed_synth, tmp_path, feature_columns
+):
+    metadata = _valid_metadata()
+    metadata["feature_columns"] = feature_columns
+    _write_bundle(tmp_path, metadata=metadata)
+
+    with pytest.raises(ModelCompatibilityError) as exc_info:
+        detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+    message = str(exc_info.value)
+    assert "Набор признаков модели несовместим" in message
+    assert "Ожидался список" in message
+    assert "Фактический список" in message
+    assert "python preprocessing.py" in message
+    assert "python train_model.py" in message
+
+
+def test_supported_metadata_version_is_accepted(preprocessed_synth, tmp_path):
+    _write_bundle(tmp_path)
+
+    detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+
+def test_unsupported_metadata_version_raises(preprocessed_synth, tmp_path):
+    metadata = _valid_metadata()
+    metadata["metadata_version"] = 2
+    _write_bundle(tmp_path, metadata=metadata)
+
+    with pytest.raises(ModelCompatibilityError, match="не поддерживается"):
+        detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+
+def test_corrupted_scaler_raises_before_predict(
+    preprocessed_synth, tmp_path
+):
+    _write_bundle(tmp_path)
+    (tmp_path / "scaler.joblib").write_bytes(b"not a joblib artifact")
+    StubModel.predict_calls = 0
+
+    with pytest.raises(ModelCompatibilityError, match="scaler.joblib"):
+        detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+    assert StubModel.predict_calls == 0
+
+
+def test_corrupted_model_raises_compatibility_error(preprocessed_synth, tmp_path):
+    _write_bundle(tmp_path)
+    (tmp_path / "iforest.joblib").write_bytes(b"not a joblib artifact")
+
+    with pytest.raises(ModelCompatibilityError, match="iforest.joblib"):
+        detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+
+def test_scaler_requires_transform(preprocessed_synth, tmp_path):
+    _write_bundle(tmp_path, scaler=object())
+
+    with pytest.raises(ModelCompatibilityError, match="transform"):
+        detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+
+def test_model_requires_predict(preprocessed_synth, tmp_path):
+    _write_bundle(tmp_path, model=ModelWithoutPredict())
+
+    with pytest.raises(ModelCompatibilityError, match="predict"):
+        detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+
+def test_model_requires_decision_function(preprocessed_synth, tmp_path):
+    _write_bundle(tmp_path, model=ModelWithoutDecisionFunction())
+
+    with pytest.raises(ModelCompatibilityError, match="decision_function"):
+        detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+
+def test_scaler_feature_count_must_match(preprocessed_synth, tmp_path):
+    scaler = StubScaler()
+    scaler.n_features_in_ = len(FEATURE_COLUMNS) - 1
+    _write_bundle(tmp_path, scaler=scaler)
+
+    with pytest.raises(ModelCompatibilityError, match="scaler.joblib"):
+        detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+
+def test_model_feature_count_must_match(preprocessed_synth, tmp_path):
+    model = StubModel()
+    model.n_features_in_ = len(FEATURE_COLUMNS) + 1
+    _write_bundle(tmp_path, model=model)
+
+    with pytest.raises(ModelCompatibilityError, match="iforest.joblib"):
+        detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+
+def test_valid_bundle_calls_inference_methods_and_stays_unchanged(
+    preprocessed_synth, tmp_path
+):
+    _write_bundle(tmp_path)
+    artifact_paths = [
+        tmp_path / "scaler.joblib",
+        tmp_path / "iforest.joblib",
+        tmp_path / "model_meta.json",
+    ]
+    hashes_before = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in artifact_paths
+    }
+    StubScaler.transform_calls = 0
+    StubModel.predict_calls = 0
+    StubModel.decision_function_calls = 0
+
+    detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+    assert StubScaler.transform_calls == 1
+    assert StubModel.predict_calls == 1
+    assert StubModel.decision_function_calls == 1
+    assert {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in artifact_paths
+    } == hashes_before
 
 
 def test_inference_never_calls_fit(preprocessed_synth, tmp_path, monkeypatch):
@@ -267,14 +499,23 @@ def test_meta_json_written(preprocessed_synth, tmp_path):
     train_model.save_model(scaler, model, info, model_dir=str(tmp_path))
     with open(tmp_path / "model_meta.json", encoding="utf-8") as fh:
         meta = json.load(fh)
+    assert meta["metadata_version"] == 1
     assert meta["feature_columns"] == train_model.FEATURE_COLUMNS
     assert meta["trained_on_normal"] is True
-    for key in (
+    expected_fields = {
+        "metadata_version",
+        "feature_columns",
+        "contamination",
+        "random_state",
+        "n_estimators",
+        "train_rows",
+        "trained_on_normal",
         "split_strategy",
         "test_start",
-        "train_rows",
         "evaluation_rows",
         "evaluation_normal_rows",
         "evaluation_anomaly_rows",
-    ):
+    }
+    assert expected_fields.issubset(meta)
+    for key in expected_fields & info.keys():
         assert meta[key] == info[key]

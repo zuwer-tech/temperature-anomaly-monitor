@@ -217,6 +217,7 @@ def save_model(scaler, model, info, model_dir=MODEL_DIR, contamination=DEFAULT_C
     dump(scaler, os.path.join(model_dir, "scaler.joblib"))
     dump(model, os.path.join(model_dir, "iforest.joblib"))
     meta = {
+        "metadata_version": 1,
         "feature_columns": FEATURE_COLUMNS,
         "contamination": contamination,
         "random_state": RANDOM_STATE,

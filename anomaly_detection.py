@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 
@@ -9,6 +10,40 @@ from joblib import load
 
 class ModelNotTrainedError(RuntimeError):
     """Обученная модель отсутствует или сохранена не полностью."""
+
+
+class ModelCompatibilityError(RuntimeError):
+    """Сохранённая модель повреждена или несовместима с текущим кодом."""
+
+
+FEATURE_COLUMNS = [
+    "temperature_filled",
+    "rolling_mean",
+    "rolling_std",
+    "temp_diff",
+    "abs_temp_diff",
+    "abs_z_score",
+    "is_missing",
+    "is_stuck",
+    "abs_diff_from_group_mean",
+    "rolling_temp_diff_mean_20",
+]
+
+METADATA_VERSION = 1
+REQUIRED_METADATA_FIELDS = (
+    "feature_columns",
+    "contamination",
+    "random_state",
+    "n_estimators",
+    "train_rows",
+    "trained_on_normal",
+    "split_strategy",
+    "test_start",
+    "evaluation_rows",
+    "evaluation_normal_rows",
+    "evaluation_anomaly_rows",
+)
+RETRAIN_COMMANDS = "python preprocessing.py\npython train_model.py"
 
 
 # Единое место настройки порогов правил. Меняйте значения здесь, а не в теле
@@ -37,13 +72,102 @@ def _rolling_slope(series, window):
     return series.rolling(window=window, min_periods=window).apply(_slope, raw=True)
 
 
+def _compatibility_error(message):
+    return ModelCompatibilityError(
+        f"{message} Переобучите модель:\n{RETRAIN_COMMANDS}"
+    )
+
+
+def _load_and_validate_model_metadata(model_dir):
+    """Читает metadata и проверяет совместимость набора признаков."""
+    path = os.path.join(model_dir, "model_meta.json")
+    try:
+        with open(path, encoding="utf-8") as metadata_file:
+            metadata = json.load(metadata_file)
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise _compatibility_error(
+            f"Не удалось прочитать model_meta.json: {error}."
+        ) from None
+
+    if not isinstance(metadata, dict):
+        raise _compatibility_error(
+            "model_meta.json должен содержать JSON-объект верхнего уровня."
+        )
+
+    if metadata.get("metadata_version") != METADATA_VERSION:
+        raise _compatibility_error(
+            "Версия metadata модели не поддерживается: "
+            f"ожидалась {METADATA_VERSION}, получена "
+            f"{metadata.get('metadata_version')!r}."
+        )
+
+    missing_fields = [
+        field for field in REQUIRED_METADATA_FIELDS if field not in metadata
+    ]
+    if missing_fields:
+        raise _compatibility_error(
+            "В model_meta.json отсутствуют обязательные поля: "
+            f"{', '.join(missing_fields)}."
+        )
+
+    actual_features = metadata["feature_columns"]
+    if (
+        not isinstance(actual_features, list)
+        or not all(isinstance(column, str) for column in actual_features)
+        or actual_features != FEATURE_COLUMNS
+    ):
+        raise _compatibility_error(
+            "Набор признаков модели несовместим с текущим кодом. "
+            f"Ожидался список: {FEATURE_COLUMNS}. "
+            f"Фактический список: {actual_features!r}."
+        )
+
+    return metadata
+
+
+def _load_joblib_artifact(path, filename):
+    try:
+        return load(path)
+    except Exception as error:
+        raise _compatibility_error(
+            f"Не удалось загрузить {filename}: {error}."
+        ) from None
+
+
+def _validate_model_objects(scaler, model):
+    """Проверяет интерфейсы и число входных признаков объектов joblib."""
+    if not callable(getattr(scaler, "transform", None)):
+        raise _compatibility_error(
+            "scaler.joblib не содержит объект с методом transform()."
+        )
+
+    for method_name in ("predict", "decision_function"):
+        if not callable(getattr(model, method_name, None)):
+            raise _compatibility_error(
+                "iforest.joblib не содержит объект с методом "
+                f"{method_name}()."
+            )
+
+    expected_features = len(FEATURE_COLUMNS)
+    for filename, artifact in (
+        ("scaler.joblib", scaler),
+        ("iforest.joblib", model),
+    ):
+        if hasattr(artifact, "n_features_in_"):
+            actual_features = artifact.n_features_in_
+            if actual_features != expected_features:
+                raise _compatibility_error(
+                    f"{filename} ожидает несовместимое число признаков: "
+                    f"ожидалось {expected_features}, получено {actual_features}."
+                )
+
+
 def _load_or_fit_iforest(X, model_dir="models"):
-    """Загружает модель и возвращает результаты инференса без переобучения."""
-    path_scaler = os.path.join(model_dir, "scaler.joblib")
-    path_model = os.path.join(model_dir, "iforest.joblib")
+    """Загружает проверенную модель и выполняет инференс без переобучения."""
     artifacts = {
-        "scaler.joblib": path_scaler,
-        "iforest.joblib": path_model,
+        "scaler.joblib": os.path.join(model_dir, "scaler.joblib"),
+        "iforest.joblib": os.path.join(model_dir, "iforest.joblib"),
+        "model_meta.json": os.path.join(model_dir, "model_meta.json"),
     }
     missing = [name for name, path in artifacts.items() if not os.path.isfile(path)]
 
@@ -52,12 +176,13 @@ def _load_or_fit_iforest(X, model_dir="models"):
             "Обученная модель Isolation Forest не найдена или комплект "
             "артефактов неполный. Отсутствуют файлы: "
             f"{', '.join(missing)}. Сначала выполните:\n"
-            "python preprocessing.py\n"
-            "python train_model.py"
+            f"{RETRAIN_COMMANDS}"
         )
 
-    scaler = load(path_scaler)
-    model = load(path_model)
+    _load_and_validate_model_metadata(model_dir)
+    scaler = _load_joblib_artifact(artifacts["scaler.joblib"], "scaler.joblib")
+    model = _load_joblib_artifact(artifacts["iforest.joblib"], "iforest.joblib")
+    _validate_model_objects(scaler, model)
     X_scaled = scaler.transform(X)
     predictions = model.predict(X_scaled)
     score_raw = model.decision_function(X_scaled)
@@ -170,20 +295,7 @@ def detect_anomalies(df, model_dir="models"):
     # 2. ISOLATION FOREST
     # ============================================================
 
-    feature_columns = [
-        "temperature_filled",
-        "rolling_mean",
-        "rolling_std",
-        "temp_diff",
-        "abs_temp_diff",
-        "abs_z_score",
-        "is_missing",
-        "is_stuck",
-        "abs_diff_from_group_mean",
-        "rolling_temp_diff_mean_20"
-    ]
-
-    X = df[feature_columns].replace([np.inf, -np.inf], np.nan).fillna(0)
+    X = df[FEATURE_COLUMNS].replace([np.inf, -np.inf], np.nan).fillna(0)
 
     X_scaled, iforest_prediction, iforest_score_raw, _used_saved = (
         _load_or_fit_iforest(X, model_dir=model_dir)
@@ -295,7 +407,7 @@ if __name__ == "__main__":
 
     try:
         results_df, alarm_log = detect_anomalies(df)
-    except ModelNotTrainedError as error:
+    except (ModelNotTrainedError, ModelCompatibilityError) as error:
         print(f"Ошибка: {error}", file=sys.stderr)
         raise SystemExit(1) from None
 

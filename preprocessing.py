@@ -120,8 +120,8 @@ def preprocess_data(df, rolling_window=ROLLING_WINDOW):
         .bfill()
     )
 
-    # Если у какого-то датчика все значения пустые, после ffill/bfill могут остаться NaN
-    df["temperature_filled"] = df["temperature_filled"].fillna(0)
+    # Полностью пустой канал остаётся NaN: отсутствие измерения не является 0 °C.
+    # Частичные пропуски по-прежнему заполняются только значениями того же датчика.
 
     # Скользящие признаки
     window_size = rolling_window

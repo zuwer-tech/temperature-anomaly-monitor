@@ -2,6 +2,8 @@ import json
 import os
 import sys
 
+from model_schema import FEATURE_COLUMNS, METADATA_VERSION
+
 import pandas as pd
 import numpy as np
 
@@ -16,20 +18,6 @@ class ModelCompatibilityError(RuntimeError):
     """Сохранённая модель повреждена или несовместима с текущим кодом."""
 
 
-FEATURE_COLUMNS = [
-    "temperature_filled",
-    "rolling_mean",
-    "rolling_std",
-    "temp_diff",
-    "abs_temp_diff",
-    "abs_z_score",
-    "is_missing",
-    "is_stuck",
-    "abs_diff_from_group_mean",
-    "rolling_temp_diff_mean_20",
-]
-
-METADATA_VERSION = 1
 REQUIRED_METADATA_FIELDS = (
     "feature_columns",
     "contamination",
@@ -111,14 +99,15 @@ def _load_and_validate_model_metadata(model_dir):
         )
 
     actual_features = metadata["feature_columns"]
+    expected_features = list(FEATURE_COLUMNS)
     if (
         not isinstance(actual_features, list)
         or not all(isinstance(column, str) for column in actual_features)
-        or actual_features != FEATURE_COLUMNS
+        or actual_features != expected_features
     ):
         raise _compatibility_error(
             "Набор признаков модели несовместим с текущим кодом. "
-            f"Ожидался список: {FEATURE_COLUMNS}. "
+            f"Ожидался список: {expected_features}. "
             f"Фактический список: {actual_features!r}."
         )
 
@@ -295,7 +284,7 @@ def detect_anomalies(df, model_dir="models"):
     # 2. ISOLATION FOREST
     # ============================================================
 
-    X = df[FEATURE_COLUMNS].replace([np.inf, -np.inf], np.nan).fillna(0)
+    X = df[list(FEATURE_COLUMNS)].replace([np.inf, -np.inf], np.nan).fillna(0)
 
     X_scaled, iforest_prediction, iforest_score_raw, _used_saved = (
         _load_or_fit_iforest(X, model_dir=model_dir)

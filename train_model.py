@@ -23,27 +23,13 @@ import json
 import os
 import warnings
 
+from model_schema import FEATURE_COLUMNS, METADATA_VERSION
+
 import numpy as np
 import pandas as pd
 from joblib import dump
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
-
-# Список признаков должен совпадать с тем, что использует
-# anomaly_detection.detect_anomalies при работе с моделью. Дублируется сюда
-# осознанно, чтобы train_model.py не depended от модуля детекции.
-FEATURE_COLUMNS = [
-    "temperature_filled",
-    "rolling_mean",
-    "rolling_std",
-    "temp_diff",
-    "abs_temp_diff",
-    "abs_z_score",
-    "is_missing",
-    "is_stuck",
-    "abs_diff_from_group_mean",
-    "rolling_temp_diff_mean_20",
-]
 
 MODEL_DIR = "models"
 DEFAULT_INPUT = "preprocessed_temperature_data.csv"
@@ -69,7 +55,7 @@ def prepare_features(df):
         df.groupby("sensor_id")["temp_diff"]
         .transform(lambda x: x.rolling(window=20, min_periods=1).mean())
     )
-    X = df[FEATURE_COLUMNS].replace([np.inf, -np.inf], np.nan).fillna(0)
+    X = df[list(FEATURE_COLUMNS)].replace([np.inf, -np.inf], np.nan).fillna(0)
     return df, X
 
 
@@ -217,8 +203,8 @@ def save_model(scaler, model, info, model_dir=MODEL_DIR, contamination=DEFAULT_C
     dump(scaler, os.path.join(model_dir, "scaler.joblib"))
     dump(model, os.path.join(model_dir, "iforest.joblib"))
     meta = {
-        "metadata_version": 1,
-        "feature_columns": FEATURE_COLUMNS,
+        "metadata_version": METADATA_VERSION,
+        "feature_columns": list(FEATURE_COLUMNS),
         "contamination": contamination,
         "random_state": RANDOM_STATE,
         "n_estimators": N_ESTIMATORS,

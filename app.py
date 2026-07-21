@@ -4,6 +4,8 @@ import plotly.express as px
 
 from preprocessing import preprocess_data
 from anomaly_detection import (
+    ANALYSIS_MODE_RULES_ML,
+    ANALYSIS_MODE_RULES_ONLY,
     ModelCompatibilityError,
     ModelNotTrainedError,
     detect_anomalies,
@@ -32,6 +34,11 @@ def load_demo_data():
     results["timestamp"] = pd.to_datetime(results["timestamp"])
     alarms["Время"] = pd.to_datetime(alarms["Время"])
 
+    if "analysis_mode" not in results.columns:
+        results["analysis_mode"] = ANALYSIS_MODE_RULES_ML
+    if "Режим_анализа" not in alarms.columns:
+        alarms["Режим_анализа"] = ANALYSIS_MODE_RULES_ML
+
     return results, alarms
 
 
@@ -56,6 +63,16 @@ else:
         st.warning("Загрузите CSV-файл для анализа.")
         st.stop()
 
+    analysis_mode = st.sidebar.radio(
+        "Режим анализа:",
+        [ANALYSIS_MODE_RULES_ML, ANALYSIS_MODE_RULES_ONLY],
+        help=(
+            "rules+ML использует инженерные правила и заранее обученную модель; "
+            "rules-only — только инженерные правила."
+        ),
+    )
+    use_ml = analysis_mode == ANALYSIS_MODE_RULES_ML
+
     raw_df = pd.read_csv(uploaded_file)
 
     try:
@@ -68,7 +85,7 @@ else:
         st.stop()
 
     try:
-        df, alarm_log = detect_anomalies(preprocessed_df)
+        df, alarm_log = detect_anomalies(preprocessed_df, use_ml=use_ml)
 
         df["timestamp"] = pd.to_datetime(df["timestamp"])
         alarm_log["Время"] = pd.to_datetime(alarm_log["Время"])
@@ -105,6 +122,25 @@ st.markdown(
     для оператора.
     """
 )
+
+active_modes = df["analysis_mode"].dropna().unique().tolist()
+if len(active_modes) != 1:
+    st.error("Не удалось однозначно определить режим анализа результатов.")
+    st.stop()
+
+active_mode = active_modes[0]
+if active_mode == ANALYSIS_MODE_RULES_ML:
+    st.success(
+        "Режим анализа: rules+ML — инженерные правила и Isolation Forest."
+    )
+elif active_mode == ANALYSIS_MODE_RULES_ONLY:
+    st.warning(
+        "Режим анализа: rules-only — только инженерные правила; "
+        "ИИ-модель не применялась."
+    )
+else:
+    st.error(f"Неизвестный режим анализа: {active_mode}")
+    st.stop()
 
 
 # ============================================================
@@ -388,72 +424,78 @@ with tab2:
 with tab3:
     st.subheader("🧠 Anomaly score")
 
-    st.markdown(
-        """
-        **Anomaly score** показывает степень подозрительности поведения датчика.  
-        Чем ближе значение к **1**, тем более нетипичным считается участок.
-        
-        Условная интерпретация:
-        - **0.00–0.60** — нормальное или слабо подозрительное поведение;
-        - **0.60–0.85** — зона предупреждения;
-        - **выше 0.85** — высокий риск.
-        """
-    )
-
-    score_fig = px.line(
-        filtered_df,
-        x="timestamp",
-        y="anomaly_score_norm",
-        color="sensor_id",
-        title="Оценка аномальности поведения датчиков",
-        labels={
-            "timestamp": "Время",
-            "anomaly_score_norm": "Anomaly score",
-            "sensor_id": "Датчик"
-        }
-    )
-
-    # Линия уровня Warning
-    score_fig.add_hline(
-        y=0.60,
-        line_dash="dash",
-        annotation_text="Порог предупреждения",
-        annotation_position="top left"
-    )
-
-    # Линия уровня High
-    score_fig.add_hline(
-        y=0.85,
-        line_dash="dash",
-        annotation_text="Высокий порог",
-        annotation_position="top left"
-    )
-
-    # Точки финальных аномалий
-    score_anomalies = filtered_df[filtered_df["final_anomaly"] == 1]
-
-    score_fig.add_scatter(
-        x=score_anomalies["timestamp"],
-        y=score_anomalies["anomaly_score_norm"],
-        mode="markers",
-        marker=dict(size=8, color="red"),
-        name="Финальные аномалии",
-        text=score_anomalies["sensor_id"],
-        hovertemplate=(
-            "Датчик: %{text}<br>"
-            "Время: %{x}<br>"
-            "Anomaly score: %{y:.3f}<br>"
-            "<extra></extra>"
+    if active_mode == ANALYSIS_MODE_RULES_ONLY:
+        st.info(
+            "Anomaly score не рассчитывается: ИИ-модель в этом запуске "
+            "не применялась."
         )
-    )
+    else:
+        st.markdown(
+            """
+            **Anomaly score** показывает степень подозрительности поведения датчика.  
+            Чем ближе значение к **1**, тем более нетипичным считается участок.
+        
+            Условная интерпретация:
+            - **0.00–0.60** — нормальное или слабо подозрительное поведение;
+            - **0.60–0.85** — зона предупреждения;
+            - **выше 0.85** — высокий риск.
+            """
+        )
 
-    score_fig.update_layout(
-        hovermode="x unified",
-        yaxis_title="Anomaly score",
-        xaxis_title="Время"
-    )
+        score_fig = px.line(
+            filtered_df,
+            x="timestamp",
+            y="anomaly_score_norm",
+            color="sensor_id",
+            title="Оценка аномальности поведения датчиков",
+            labels={
+                "timestamp": "Время",
+                "anomaly_score_norm": "Anomaly score",
+                "sensor_id": "Датчик"
+            }
+        )
 
-    st.plotly_chart(score_fig, use_container_width=True)
+        # Линия уровня Warning
+        score_fig.add_hline(
+            y=0.60,
+            line_dash="dash",
+            annotation_text="Порог предупреждения",
+            annotation_position="top left"
+        )
+
+        # Линия уровня High
+        score_fig.add_hline(
+            y=0.85,
+            line_dash="dash",
+            annotation_text="Высокий порог",
+            annotation_position="top left"
+        )
+
+        # Точки финальных аномалий
+        score_anomalies = filtered_df[filtered_df["final_anomaly"] == 1]
+
+        score_fig.add_scatter(
+            x=score_anomalies["timestamp"],
+            y=score_anomalies["anomaly_score_norm"],
+            mode="markers",
+            marker=dict(size=8, color="red"),
+            name="Финальные аномалии",
+            text=score_anomalies["sensor_id"],
+            hovertemplate=(
+                "Датчик: %{text}<br>"
+                "Время: %{x}<br>"
+                "Anomaly score: %{y:.3f}<br>"
+                "<extra></extra>"
+            )
+        )
+
+        score_fig.update_layout(
+            hovermode="x unified",
+            yaxis_title="Anomaly score",
+            xaxis_title="Время"
+        )
+
+        st.plotly_chart(score_fig, use_container_width=True)
 
 # ============================================================
 # 9. ЖУРНАЛ ТРЕВОГ

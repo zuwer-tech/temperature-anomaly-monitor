@@ -20,6 +20,8 @@ import anomaly_detection
 import model_schema
 from preprocessing import preprocess_data
 from anomaly_detection import (
+    ANALYSIS_MODE_RULES_ML,
+    ANALYSIS_MODE_RULES_ONLY,
     FEATURE_COLUMNS,
     ModelCompatibilityError,
     ModelNotTrainedError,
@@ -248,8 +250,44 @@ def test_detect_anomalies_uses_saved_model(preprocessed_synth, tmp_path):
         "iforest_score_raw",
         "anomaly_score",
         "anomaly_score_norm",
+        "analysis_mode",
         "final_anomaly",
     }.issubset(results.columns)
+
+
+def test_rules_and_ml_mode_is_recorded_in_results_and_alarms(
+    preprocessed_synth, tmp_path
+):
+    _write_bundle(tmp_path)
+
+    results, alarm_log = detect_anomalies(
+        preprocessed_synth, model_dir=str(tmp_path)
+    )
+
+    assert set(results["analysis_mode"].unique()) == {ANALYSIS_MODE_RULES_ML}
+    assert "Режим_анализа" in alarm_log.columns
+    assert set(alarm_log["Режим_анализа"].unique()) <= {ANALYSIS_MODE_RULES_ML}
+
+
+def test_rules_only_mode_skips_model_and_marks_scores_unavailable(
+    preprocessed_synth, tmp_path
+):
+    results, alarm_log = detect_anomalies(
+        preprocessed_synth, model_dir=str(tmp_path), use_ml=False
+    )
+
+    assert list(tmp_path.iterdir()) == []
+    assert set(results["analysis_mode"].unique()) == {ANALYSIS_MODE_RULES_ONLY}
+    assert (results["iforest_anomaly"] == 0).all()
+    assert results["iforest_prediction"].isna().all()
+    assert results["anomaly_score_norm"].isna().all()
+    pd.testing.assert_series_equal(
+        results["final_anomaly"],
+        results["rule_anomaly"],
+        check_names=False,
+    )
+    assert "Режим_анализа" in alarm_log.columns
+    assert set(alarm_log["Режим_анализа"].unique()) <= {ANALYSIS_MODE_RULES_ONLY}
 
 
 def test_missing_model_artifacts_raise_without_creating_files(

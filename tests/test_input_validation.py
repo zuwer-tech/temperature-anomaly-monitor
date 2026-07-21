@@ -124,8 +124,33 @@ def test_preprocess_marks_missing_temperature():
     df.loc[0, "temperature"] = np.nan
 
     result = preprocess_data(df)
+    missing_row = result.loc[
+        result["timestamp"] == pd.Timestamp("2026-01-01")
+    ].iloc[0]
 
-    assert result.loc[result["timestamp"] == pd.Timestamp("2026-01-01"), "is_missing"].item() == 1
+    assert missing_row["is_missing"] == 1
+    assert missing_row["temperature_filled"] == 71.0
+
+
+def test_fully_missing_sensor_channel_is_not_replaced_with_zero():
+    timestamps = pd.date_range("2026-01-01", periods=3, freq="1min")
+    df = pd.DataFrame(
+        {
+            "timestamp": list(timestamps) * 2,
+            "sensor_id": ["T-EMPTY"] * 3 + ["T-ACTIVE"] * 3,
+            "temperature": [np.nan, np.nan, np.nan, 70.0, 71.0, 72.0],
+        }
+    )
+
+    result = preprocess_data(df)
+    empty_channel = result[result["sensor_id"] == "T-EMPTY"]
+    active_channel = result[result["sensor_id"] == "T-ACTIVE"]
+
+    assert empty_channel["temperature_filled"].isna().all()
+    assert empty_channel["is_missing"].eq(1).all()
+    assert empty_channel["preliminary_warning"].eq(1).all()
+    assert empty_channel["is_stuck"].eq(0).all()
+    assert active_channel["temperature_filled"].tolist() == [70.0, 71.0, 72.0]
 
 
 def test_extra_columns_are_allowed():

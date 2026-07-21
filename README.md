@@ -60,7 +60,8 @@ streamlit run app.py
 ```
 
 Модель Isolation Forest берётся из папки `models/`. Для анализа пользовательского
-CSV заранее подготовьте оба артефакта (`scaler.joblib` и `iforest.joblib`):
+CSV заранее подготовьте полный комплект (`scaler.joblib`, `iforest.joblib` и
+`model_meta.json`):
 
 ```bash
 python preprocessing.py      # synthetic_temperature_data.csv -> preprocessed_temperature_data.csv
@@ -147,9 +148,15 @@ timestamp,sensor_id,temperature
 ## Типичные проблемы (troubleshooting)
 
 - **«Обученная модель не найдена или комплект артефактов неполный»** — в
-  `models/` нет `scaler.joblib` и/или `iforest.joblib`. Запустите
+  `models/` нет `scaler.joblib`, `iforest.joblib` и/или `model_meta.json`.
+  Запустите `python preprocessing.py`, затем `python train_model.py`. До
+  обучения анализ пользовательского CSV не запускается, чтобы исключить data
+  leakage.
+- **«Сохранённая модель повреждена или несовместима»** — metadata не читается,
+  признаки или их порядок изменились либо scaler/model не соответствуют
+  текущему коду. Удалять отдельные файлы недостаточно: заново запустите
   `python preprocessing.py`, затем `python train_model.py`. До обучения анализ
-  пользовательского CSV не запускается, чтобы исключить data leakage.
+  не выполняется.
 - **Реальные данные `Т2.csv` не грузятся в приложение** — у них другая схема
   (`time_s`, `temp_C`, один датчик). Сначала `python data_adapters.py`.
 - **`pytest` не запускается** — установите `requirements-dev.txt`.

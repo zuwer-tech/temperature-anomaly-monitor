@@ -3,7 +3,11 @@ import streamlit as st
 import plotly.express as px
 
 from preprocessing import preprocess_data
-from anomaly_detection import ModelNotTrainedError, detect_anomalies
+from anomaly_detection import (
+    ModelCompatibilityError,
+    ModelNotTrainedError,
+    detect_anomalies,
+)
 
 # ============================================================
 # 1. НАСТРОЙКИ СТРАНИЦЫ
@@ -74,6 +78,11 @@ else:
     except ModelNotTrainedError as error:
         st.error(str(error))
         st.info("Подготовьте данные и заранее обучите модель:")
+        st.code("python preprocessing.py\npython train_model.py", language="bash")
+        st.stop()
+    except ModelCompatibilityError as error:
+        st.error(str(error))
+        st.info("Сохранённая модель повреждена или несовместима. Переобучите её:")
         st.code("python preprocessing.py\npython train_model.py", language="bash")
         st.stop()
     except Exception as error:

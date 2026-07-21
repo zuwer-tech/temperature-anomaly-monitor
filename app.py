@@ -123,6 +123,7 @@ st.markdown(
     """
 )
 
+
 active_modes = df["analysis_mode"].dropna().unique().tolist()
 if len(active_modes) != 1:
     st.error("Не удалось однозначно определить режим анализа результатов.")

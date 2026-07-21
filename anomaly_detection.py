@@ -17,7 +17,6 @@ class ModelNotTrainedError(RuntimeError):
 class ModelCompatibilityError(RuntimeError):
     """Сохранённая модель повреждена или несовместима с текущим кодом."""
 
-
 ANALYSIS_MODE_RULES_ONLY = "rules-only"
 ANALYSIS_MODE_RULES_ML = "rules+ML"
 

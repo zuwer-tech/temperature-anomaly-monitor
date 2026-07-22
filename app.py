@@ -3,6 +3,7 @@ import streamlit as st
 import plotly.express as px
 
 from preprocessing import preprocess_data
+from events import group_anomaly_events
 from anomaly_detection import (
     ANALYSIS_MODE_RULES_ML,
     ANALYSIS_MODE_RULES_ONLY,
@@ -143,6 +144,8 @@ else:
     st.error(f"Неизвестный режим анализа: {active_mode}")
     st.stop()
 
+event_log = group_anomaly_events(df)
+
 
 # ============================================================
 # 4. БОКОВАЯ ПАНЕЛЬ ФИЛЬТРОВ
@@ -228,6 +231,11 @@ if len(alarm_log) > 0:
     ].copy()
 else:
     filtered_alarm_log = alarm_log.copy()
+
+filtered_event_log = event_log[
+    (event_log["sensor_id"].isin(selected_sensors))
+    & (event_log["max_risk"].isin(selected_risk_levels))
+].copy()
 
 # Применяем фильтр сценариев к журналу тревог
 if "Истинный_сценарий" in filtered_alarm_log.columns and selected_scenarios is not None:
@@ -502,7 +510,41 @@ with tab3:
 # 9. ЖУРНАЛ ТРЕВОГ
 # ============================================================
 with tab4:
-    st.subheader("🚨 Журнал тревог")
+    st.subheader("🧩 Сгруппированные события")
+
+    if len(filtered_event_log) == 0:
+        st.info("По выбранным фильтрам событий не найдено.")
+    else:
+        event_table = filtered_event_log.rename(columns={
+            "event_id": "ID события",
+            "sensor_id": "Датчик",
+            "event_start": "Начало",
+            "event_end": "Конец",
+            "duration_seconds": "Длительность, с",
+            "point_count": "Точек тревоги",
+            "max_temperature": "Максимальная температура",
+            "reasons": "Причины",
+            "max_risk": "Максимальный риск",
+            "recommendation": "Рекомендация",
+        })
+        st.dataframe(
+            event_table,
+            use_container_width=True,
+            hide_index=True,
+        )
+        event_csv = event_table.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            label="⬇️ Скачать журнал событий",
+            data=event_csv,
+            file_name="event_log_filtered.csv",
+            mime="text/csv",
+        )
+
+    st.caption(
+        "Соседние аномальные точки одного датчика объединены в одно событие. "
+        "Нормальная точка завершает событие."
+    )
+    st.subheader("🚨 Отдельные точки тревог")
 
     table_df = filtered_alarm_log.copy()
 

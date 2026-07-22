@@ -15,7 +15,7 @@ def build_data_quality_report(df):
         raise ValueError("Missing required columns: " + ", ".join(missing))
 
     rows = len(df)
-    timestamps = pd.to_datetime(df["timestamp"], errors="coerce")
+    timestamps = pd.to_datetime(df["timestamp"], errors="coerce", format="mixed")
     ids = df["sensor_id"]
     keys = ids.astype("string").str.strip()
     valid_ids = ids.notna() & keys.ne("")

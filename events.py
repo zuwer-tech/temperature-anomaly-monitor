@@ -144,10 +144,10 @@ def group_anomaly_events(detected):
         event_end = event["timestamp"].iloc[-1]
 
         temperature_column = (
-            "temperature_filled"
-            if "temperature_filled" in event
-            else "temperature"
+            "temperature"
             if "temperature" in event
+            else "temperature_filled"
+            if "temperature_filled" in event
             else None
         )
         if temperature_column is None:

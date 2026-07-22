@@ -27,6 +27,7 @@ def _detected_rows():
                 "T-02",
             ],
             "final_anomaly": [1, 1, 1, 0, 1, 1, 1],
+            "temperature": [74.0, 71.0, 73.0, 72.0, np.nan, 78.0, 65.0],
             "temperature_filled": [74.0, 71.0, 73.0, 72.0, 80.0, 78.0, 65.0],
             "triggered_rules": [
                 ["sustained_overheat"],
@@ -108,7 +109,7 @@ def test_long_anomaly_becomes_one_event_with_aggregated_fields():
     assert second["event_start"] == pd.Timestamp("2026-01-01 00:04:00")
     assert second["event_end"] == pd.Timestamp("2026-01-01 00:05:00")
     assert second["duration_seconds"] == 60.0
-    assert second["max_temperature"] == 80.0
+    assert second["max_temperature"] == 78.0
     assert second["reasons"] == ["sharp_jump", "signal_loss"]
     assert second["max_risk"] == "High"
     assert second["recommendation"] == "Проверить канал"
@@ -157,6 +158,7 @@ def test_unknown_risk_is_rejected():
 def test_missing_optional_explanation_fields_still_groups_events():
     detected = _detected_rows().drop(
         columns=[
+            "temperature",
             "temperature_filled",
             "triggered_rules",
             "primary_reason",

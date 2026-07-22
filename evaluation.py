@@ -63,15 +63,16 @@ def binary_classification_metrics(y_true, y_pred):
 
 def evaluate_detection_layers(df, model_dir=MODEL_DIR, test_start=TEST_START):
     """Считает единый отчёт на одной независимой evaluation-выборке."""
+    if "scenario" not in df.columns:
+        raise ValueError(
+            "Для оценки нужна колонка scenario с эталонной разметкой."
+        )
+
     detected, _alarm_log = detect_anomalies(df, model_dir=model_dir)
     _train, evaluation, _x_train, _x_evaluation, split_info = (
         split_train_evaluation(detected, test_start=test_start)
     )
 
-    if "scenario" not in evaluation.columns:
-        raise ValueError(
-            "Для оценки нужна колонка scenario с эталонной разметкой."
-        )
 
     truth = (evaluation["scenario"] != "normal").astype(int)
     layers = {

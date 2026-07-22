@@ -5,6 +5,7 @@ FEATURE_COLUMNS = (
     "rolling_mean",
     "rolling_std",
     "temp_diff",
+    "temp_rate_c_per_min",
     "abs_temp_diff",
     "abs_z_score",
     "is_missing",

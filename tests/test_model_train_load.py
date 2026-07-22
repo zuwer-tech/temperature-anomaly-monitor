@@ -101,6 +101,7 @@ def test_model_schema_is_shared_and_has_expected_order():
         "rolling_mean",
         "rolling_std",
         "temp_diff",
+        "temp_rate_c_per_min",
         "abs_temp_diff",
         "abs_z_score",
         "is_missing",
@@ -111,7 +112,7 @@ def test_model_schema_is_shared_and_has_expected_order():
 
     assert isinstance(model_schema.FEATURE_COLUMNS, tuple)
     assert model_schema.FEATURE_COLUMNS == expected
-    assert len(model_schema.FEATURE_COLUMNS) == 10
+    assert len(model_schema.FEATURE_COLUMNS) == 11
     assert train_model.FEATURE_COLUMNS is model_schema.FEATURE_COLUMNS
     assert anomaly_detection.FEATURE_COLUMNS is model_schema.FEATURE_COLUMNS
     assert train_model.METADATA_VERSION is model_schema.METADATA_VERSION

@@ -2,7 +2,11 @@ import json
 import os
 import sys
 
-from model_schema import FEATURE_COLUMNS, METADATA_VERSION
+from model_schema import (
+    FEATURE_COLUMNS,
+    METADATA_VERSION,
+    SCORE_CALIBRATION_METHOD,
+)
 from rule_config import RULE_PARAMS
 
 import pandas as pd
@@ -43,6 +47,7 @@ REQUIRED_METADATA_FIELDS = (
     "evaluation_rows",
     "evaluation_normal_rows",
     "evaluation_anomaly_rows",
+    "score_calibration",
 )
 RETRAIN_COMMANDS = "python preprocessing.py\npython train_model.py"
 
@@ -85,8 +90,68 @@ def _compatibility_error(message):
     )
 
 
+def _validate_score_calibration(calibration):
+    """Проверяет сохранённую шкалу score и пороги риска."""
+    if not isinstance(calibration, dict):
+        raise _compatibility_error(
+            "Поле score_calibration должно содержать JSON-объект."
+        )
+
+    required_fields = (
+        "method",
+        "score_min",
+        "score_max",
+        "medium_threshold",
+        "high_threshold",
+    )
+    missing_fields = [
+        field for field in required_fields if field not in calibration
+    ]
+    if missing_fields:
+        raise _compatibility_error(
+            "В score_calibration отсутствуют обязательные поля: "
+            f"{', '.join(missing_fields)}."
+        )
+
+    if calibration["method"] != SCORE_CALIBRATION_METHOD:
+        raise _compatibility_error(
+            "Метод калибровки anomaly score несовместим с текущим кодом."
+        )
+
+    numeric_fields = (
+        "score_min",
+        "score_max",
+        "medium_threshold",
+        "high_threshold",
+    )
+    for field in numeric_fields:
+        value = calibration[field]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not np.isfinite(value)
+        ):
+            raise _compatibility_error(
+                f"Поле score_calibration.{field} должно быть конечным числом."
+            )
+
+    if calibration["score_max"] <= calibration["score_min"]:
+        raise _compatibility_error(
+            "Границы калибровки score должны удовлетворять score_max > score_min."
+        )
+    if not (
+        0 <= calibration["medium_threshold"]
+        < calibration["high_threshold"]
+        <= 1
+    ):
+        raise _compatibility_error(
+            "Пороги риска должны удовлетворять "
+            "0 <= medium_threshold < high_threshold <= 1."
+        )
+
+
 def _load_and_validate_model_metadata(model_dir):
-    """Читает metadata и проверяет совместимость набора признаков."""
+    """Читает metadata и проверяет совместимость модели."""
     path = os.path.join(model_dir, "model_meta.json")
     try:
         with open(path, encoding="utf-8") as metadata_file:
@@ -130,6 +195,7 @@ def _load_and_validate_model_metadata(model_dir):
             f"Фактический список: {actual_features!r}."
         )
 
+    _validate_score_calibration(metadata["score_calibration"])
     return metadata
 
 
@@ -187,14 +253,23 @@ def _load_or_fit_iforest(X, model_dir="models"):
             f"{RETRAIN_COMMANDS}"
         )
 
-    _load_and_validate_model_metadata(model_dir)
+    metadata = _load_and_validate_model_metadata(model_dir)
     scaler = _load_joblib_artifact(artifacts["scaler.joblib"], "scaler.joblib")
     model = _load_joblib_artifact(artifacts["iforest.joblib"], "iforest.joblib")
     _validate_model_objects(scaler, model)
     X_scaled = scaler.transform(X)
     predictions = model.predict(X_scaled)
     score_raw = model.decision_function(X_scaled)
-    return X_scaled, predictions, score_raw, True
+    return X_scaled, predictions, score_raw, metadata
+
+
+def _normalize_anomaly_score(scores, calibration):
+    """Переводит raw score на фиксированную шкалу обучающего baseline."""
+    normalized = (
+        (scores - calibration["score_min"])
+        / (calibration["score_max"] - calibration["score_min"])
+    )
+    return np.clip(normalized, 0, 1)
 
 
 def detect_anomalies(df, model_dir="models", use_ml=True):
@@ -321,7 +396,7 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
             [np.inf, -np.inf], np.nan
         ).fillna(0)
 
-        _X_scaled, iforest_prediction, iforest_score_raw, _used_saved = (
+        _X_scaled, iforest_prediction, iforest_score_raw, metadata = (
             _load_or_fit_iforest(X, model_dir=model_dir)
         )
 
@@ -330,17 +405,13 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
         df["iforest_score_raw"] = iforest_score_raw
         df["anomaly_score"] = -df["iforest_score_raw"]
 
-        min_score = df["anomaly_score"].min()
-        max_score = df["anomaly_score"].max()
-
-        if max_score != min_score:
-            df["anomaly_score_norm"] = (
-                (df["anomaly_score"] - min_score) / (max_score - min_score)
-            )
-        else:
-            df["anomaly_score_norm"] = 0
-
-        df["anomaly_score_norm"] = df["anomaly_score_norm"].fillna(0)
+        calibration = metadata["score_calibration"]
+        df["anomaly_score_norm"] = _normalize_anomaly_score(
+            df["anomaly_score"],
+            calibration,
+        ).fillna(0)
+        risk_medium_threshold = calibration["medium_threshold"]
+        risk_high_threshold = calibration["high_threshold"]
         analysis_mode = ANALYSIS_MODE_RULES_ML
     else:
         df["iforest_prediction"] = np.nan
@@ -348,6 +419,8 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
         df["iforest_score_raw"] = np.nan
         df["anomaly_score"] = np.nan
         df["anomaly_score_norm"] = np.nan
+        risk_medium_threshold = np.nan
+        risk_high_threshold = np.nan
         analysis_mode = ANALYSIS_MODE_RULES_ONLY
 
     df["analysis_mode"] = analysis_mode
@@ -381,7 +454,7 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
     )
 
     # Уточнение уровня риска по anomaly score
-    mask_high_score = df["anomaly_score_norm"] > 0.85
+    mask_high_score = df["anomaly_score_norm"] > risk_high_threshold
 
     df.loc[
         (df["final_anomaly"] == 1) & mask_high_score,
@@ -389,8 +462,8 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
     ] = "High"
 
     mask_medium_score = (
-        (df["anomaly_score_norm"] > 0.60) &
-        (df["anomaly_score_norm"] <= 0.85)
+        (df["anomaly_score_norm"] > risk_medium_threshold) &
+        (df["anomaly_score_norm"] <= risk_high_threshold)
     )
 
     df.loc[

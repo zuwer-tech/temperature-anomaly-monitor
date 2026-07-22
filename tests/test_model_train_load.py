@@ -80,7 +80,7 @@ class ModelWithoutDecisionFunction:
 
 def _valid_metadata():
     return {
-        "metadata_version": 1,
+        "metadata_version": model_schema.METADATA_VERSION,
         "feature_columns": list(FEATURE_COLUMNS),
         "contamination": 0.04,
         "random_state": 42,
@@ -92,6 +92,13 @@ def _valid_metadata():
         "evaluation_rows": 5,
         "evaluation_normal_rows": 3,
         "evaluation_anomaly_rows": 2,
+        "score_calibration": {
+            "method": model_schema.SCORE_CALIBRATION_METHOD,
+            "score_min": -1.0,
+            "score_max": 1.0,
+            "medium_threshold": model_schema.RISK_MEDIUM_THRESHOLD,
+            "high_threshold": model_schema.RISK_HIGH_THRESHOLD,
+        },
     }
 
 
@@ -387,6 +394,75 @@ def test_metadata_feature_columns_must_match_exactly(
     assert "python train_model.py" in message
 
 
+def test_score_normalization_is_independent_of_current_batch():
+    """Одна и та же точка получает один score при разных соседних строках."""
+    calibration = _valid_metadata()["score_calibration"]
+    target_score = 0.25
+
+    first_batch = anomaly_detection._normalize_anomaly_score(
+        np.array([target_score, -100.0, 100.0]),
+        calibration,
+    )
+    second_batch = anomaly_detection._normalize_anomaly_score(
+        np.array([target_score, 0.20, 0.30]),
+        calibration,
+    )
+
+    assert np.isclose(first_batch[0], second_batch[0])
+    assert np.isclose(first_batch[0], 0.625)
+    assert first_batch[1] == 0.0
+    assert first_batch[2] == 1.0
+
+
+def test_train_calibration_uses_only_training_baseline(preprocessed_synth):
+    scaler, model, info = train_model.train(preprocessed_synth)
+    _train_df, _evaluation_df, X_train, _X_evaluation, _ = (
+        train_model.split_train_evaluation(preprocessed_synth)
+    )
+    train_scores = -model.decision_function(scaler.transform(X_train))
+    calibration = info["score_calibration"]
+
+    assert calibration["method"] == model_schema.SCORE_CALIBRATION_METHOD
+    assert np.isclose(calibration["score_min"], train_scores.min())
+    assert np.isclose(calibration["score_max"], train_scores.max())
+    assert calibration["medium_threshold"] == model_schema.RISK_MEDIUM_THRESHOLD
+    assert calibration["high_threshold"] == model_schema.RISK_HIGH_THRESHOLD
+
+
+@pytest.mark.parametrize(
+    "calibration",
+    [
+        None,
+        {
+            "method": model_schema.SCORE_CALIBRATION_METHOD,
+            "score_min": 1.0,
+            "score_max": 1.0,
+            "medium_threshold": 0.60,
+            "high_threshold": 0.85,
+        },
+        {
+            "method": model_schema.SCORE_CALIBRATION_METHOD,
+            "score_min": -1.0,
+            "score_max": 1.0,
+            "medium_threshold": 0.90,
+            "high_threshold": 0.85,
+        },
+    ],
+    ids=("not-object", "equal-bounds", "reversed-thresholds"),
+)
+def test_invalid_score_calibration_is_rejected(
+    preprocessed_synth,
+    tmp_path,
+    calibration,
+):
+    metadata = _valid_metadata()
+    metadata["score_calibration"] = calibration
+    _write_bundle(tmp_path, metadata=metadata)
+
+    with pytest.raises(ModelCompatibilityError, match="score_calibration|калибровки|Пороги"):
+        detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
+
+
 def test_supported_metadata_version_is_accepted(preprocessed_synth, tmp_path):
     _write_bundle(tmp_path)
 
@@ -395,7 +471,7 @@ def test_supported_metadata_version_is_accepted(preprocessed_synth, tmp_path):
 
 def test_unsupported_metadata_version_raises(preprocessed_synth, tmp_path):
     metadata = _valid_metadata()
-    metadata["metadata_version"] = 2
+    metadata["metadata_version"] = model_schema.METADATA_VERSION + 1
     _write_bundle(tmp_path, metadata=metadata)
 
     with pytest.raises(ModelCompatibilityError, match="не поддерживается"):
@@ -579,7 +655,9 @@ def test_meta_json_written(preprocessed_synth, tmp_path):
         "evaluation_rows",
         "evaluation_normal_rows",
         "evaluation_anomaly_rows",
+        "score_calibration",
     }
     assert expected_fields.issubset(meta)
     for key in expected_fields & info.keys():
         assert meta[key] == info[key]
+    assert meta["score_calibration"] == info["score_calibration"]

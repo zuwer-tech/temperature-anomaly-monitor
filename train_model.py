@@ -23,7 +23,13 @@ import json
 import os
 import warnings
 
-from model_schema import FEATURE_COLUMNS, METADATA_VERSION
+from model_schema import (
+    FEATURE_COLUMNS,
+    METADATA_VERSION,
+    RISK_HIGH_THRESHOLD,
+    RISK_MEDIUM_THRESHOLD,
+    SCORE_CALIBRATION_METHOD,
+)
 
 import numpy as np
 import pandas as pd
@@ -142,11 +148,27 @@ def train(df, contamination=DEFAULT_CONTAMINATION, random_state=RANDOM_STATE):
     )
 
     scaler = StandardScaler().fit(X_train)
+    X_train_scaled = scaler.transform(X_train)
     model = IsolationForest(
         n_estimators=N_ESTIMATORS,
         contamination=contamination,
         random_state=random_state,
-    ).fit(scaler.transform(X_train))
+    ).fit(X_train_scaled)
+
+    train_scores = -model.decision_function(X_train_scaled)
+    score_min = float(np.min(train_scores))
+    score_max = float(np.max(train_scores))
+    if not np.isfinite(score_min) or not np.isfinite(score_max) or score_max <= score_min:
+        raise ValueError(
+            "Не удалось построить шкалу anomaly score по обучающему baseline."
+        )
+    info["score_calibration"] = {
+        "method": SCORE_CALIBRATION_METHOD,
+        "score_min": score_min,
+        "score_max": score_max,
+        "medium_threshold": RISK_MEDIUM_THRESHOLD,
+        "high_threshold": RISK_HIGH_THRESHOLD,
+    }
 
     return scaler, model, info
 
@@ -215,6 +237,7 @@ def save_model(scaler, model, info, model_dir=MODEL_DIR, contamination=DEFAULT_C
         "evaluation_rows": info["evaluation_rows"],
         "evaluation_normal_rows": info["evaluation_normal_rows"],
         "evaluation_anomaly_rows": info["evaluation_anomaly_rows"],
+        "score_calibration": info["score_calibration"],
     }
     with open(os.path.join(model_dir, "model_meta.json"), "w", encoding="utf-8") as fh:
         json.dump(meta, fh, ensure_ascii=False, indent=2)

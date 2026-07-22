@@ -1,61 +1,84 @@
 # Архитектура
 
-Проект — линейный пайплайн над DataFrame `timestamp, sensor_id, temperature`.
-Каждый модуль берёт DataFrame, обогащает и отдаёт дальше.
+Проект — линейный пакетный пайплайн над таблицей измерений
+`timestamp, sensor_id, temperature`. Расчётные модули возвращают новый
+результат и не изменяют исходную таблицу.
 
-## Модули
+## Поток данных
 
-```
-Data.py                     генератор синтетики (timestamp, sensor_id, temperature, scenario)
-  │  пишет synthetic_temperature_data.csv
-  ▼
-preprocessing.py            preprocess_data(df) -> df + признаки
-  │  признаки: is_missing, temperature_filled, rolling_mean, rolling_std,
-  │           temp_diff, abs_temp_diff, z_score, abs_z_score, is_stuck,
-  │           abs_diff_from_group_mean, preliminary_warning
-  ▼
-train_model.py              train(df) -> scaler + IsolationForest (обучение на scenario=='normal')
-  │  save_model() -> models/scaler.joblib, iforest.joblib, model_meta.json
-  ▼
-anomaly_detection.py        detect_anomalies(df, model_dir) -> df + alarm_log
-  │  1. правила (RULE_PARAMS) -> rule_anomaly, rule_event_type, risk, recommendation
-  │  2. Isolation Forest (из models/ или fit на лету) -> iforest_anomaly, anomaly_score_norm
-  │  3. final_anomaly = rule_anomaly | iforest_anomaly
-  │  4. журнал тревог (только final_anomaly==1)
-  ▼
-app.py                      Streamlit: обзор, температурный тренд, anomaly score, журнал тревог
+```text
+CSV
+ ├─ data_quality.build_data_quality_report()  паспорт входной пробы (read-only)
+ └─ preprocessing.preprocess_data()           проверка, сортировка, признаки
+          │
+          ├─ rule_config.RULE_PARAMS           пороги инженерных правил
+          ├─ model_schema.MODEL_FEATURE_COLUMNS порядок ML-признаков
+          ▼
+    anomaly_detection.detect_anomalies()
+          ├─ rules-only                        только инженерные правила
+          └─ rules+ML                          правила + сохранённый Isolation Forest
+                 │
+                 ├─ events.group_anomaly_events()   операторские события
+                 ├─ evaluation.py                   независимые метрики
+                 └─ app.py                          Streamlit-дашборд
 ```
 
-## Каноническая схема данных
+## Ответственность модулей
 
-Все модули работают с одним форматом:
+| Модуль | Ответственность |
+|---|---|
+| `Data.py` | Генерирует синтетические ряды и разметку `scenario`. |
+| `data_adapters.py` | Приводит реальный `Т2.csv` к канонической схеме. |
+| `data_quality.py` | Считает строки, датчики, пропуски, дубли и проблемы времени без изменения данных. |
+| `preprocessing.py` | Валидирует вход, сортирует по датчику и времени, рассчитывает признаки. |
+| `rule_config.py` | Хранит одну конфигурацию порогов правил. |
+| `model_schema.py` | Хранит единый список и порядок ML-признаков. |
+| `train_model.py` | Обучает scaler и Isolation Forest только на раннем штатном baseline. |
+| `anomaly_detection.py` | Применяет правила и, при выборе, заранее обученную модель. |
+| `events.py` | Группирует непрерывные аномальные точки одного датчика в события. |
+| `evaluation.py` | Считает метрики и задержку на поздней evaluation-части. |
+| `app.py` | Показывает режим, качество данных, графики, события и журнал. |
+
+## Каноническая схема входа
 
 | Колонка | Тип | Описание |
 |---|---|---|
-| `timestamp` | datetime | время измерения |
-| `sensor_id` | str | идентификатор датчика |
-| `temperature` | float | температура, °C (допускаются NaN — потеря сигнала) |
-| `scenario` | str | метка режима (опционально; для пользовательских данных — `user_data`) |
+| `timestamp` | datetime | Время измерения; обязательное и корректное. |
+| `sensor_id` | str | Непустой идентификатор датчика. |
+| `temperature` | float | Температура, °C; `NaN` означает потерю сигнала. |
+| `scenario` | str | Необязательная учебная разметка; для пользовательских данных — `user_data`. |
 
-Реальные данные `Т2.csv` (`time_s`, `temp_C`, один датчик) приводятся к этой
-схеме адаптером `data_adapters.load_t2()`.
+Предобработка сортирует строки внутри каждого датчика. Скользящие признаки
+используют только текущие и прошлые точки, а не будущие.
 
-## Два слоя обнаружения
+## Два режима анализа
 
-- **Правила** — детерминированные, объяснимые оператору. Пороги в
-  `RULE_PARAMS` (в начале `anomaly_detection.py`).
-- **Isolation Forest** — обучается на штатном режиме (`scenario == 'normal'`),
-  сохраняется в `models/`. Если модели нет — обучается на лету (запасной режим,
-  с data leakage и более низкой точностью).
+- **rules-only** применяет только инженерные правила и не загружает ML-артефакты.
+- **rules+ML** применяет правила и заранее обученную модель из
+  `models/scaler.joblib`, `models/iforest.joblib` и `models/model_meta.json`.
 
-`final_anomaly` = срабатывание хотя бы одного слоя. Если аномалию нашёл только
-ИИ (без правил), она помечается «Нетипичное поведение по ИИ-модели».
+Если комплект отсутствует, возникает `ModelNotTrainedError`. Если он
+повреждён или не соответствует `MODEL_FEATURE_COLUMNS`, возникает
+`ModelCompatibilityError`. Анализируемый CSV никогда не вызывает `fit`:
+это предотвращает data leakage и подмену нормы текущей пробой.
 
-## Ключевые параметры
+`final_anomaly` равен логическому OR решений правил и модели. Поля
+`triggered_rules`, `primary_reason` и `rule_count` сохраняют объяснение.
+Непрерывные тревоги группируются в события без пересчёта исходных решений.
 
-| Где | Параметр | По умолчанию |
-|---|---|---|
-| `preprocessing.py` | `ROLLING_WINDOW` | 10 |
-| `preprocessing.py` | `STUCK_MIN_RUN` | 10 (точное равенство) |
-| `anomaly_detection.py` | `RULE_PARAMS` | см. файл |
-| `train_model.py` | `DEFAULT_CONTAMINATION` | 0.04 |
+## Оценка и калибровка
+
+`evaluation.py` оценивает готовый пайплайн только на более поздней части
+временного ряда и не вызывает `fit`. Отчёт содержит разделы `rules`, `ml`
+и `combined`, confusion matrix и задержку обнаружения.
+
+Шкала `anomaly_score_norm` калибруется по train-baseline и сохраняется в
+`model_meta.json`. Это относительный технический балл, а не вероятность
+аварии и не сертифицированная оценка риска.
+
+## Безопасностные границы
+
+Проект предназначен для обучения и демонстрации. Он не заменяет поверку
+датчиков, технологические регламенты, независимые защиты и решения оператора.
+Изменение процесса, оборудования или состава признаков требует нового
+валидационного набора и переобучения модели.

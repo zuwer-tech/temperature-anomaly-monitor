@@ -36,3 +36,25 @@ def test_readme_links_current_status_document():
     assert "python -m pytest -q" in readme
     assert "rules-only" in readme
     assert "rules+ML" in readme
+
+
+
+def test_technical_report_has_required_sections():
+    report = (ROOT / "docs" / "TECHNICAL_REPORT.md").read_text(encoding="utf-8")
+
+    required_headings = [
+        "## 1. Задача и назначение",
+        "## 2. Данные",
+        "## 3. Архитектура",
+        "## 4. Методы обнаружения",
+        "## 5. Обучение и независимая оценка",
+        "## 6. Результаты",
+        "## 7. Ограничения",
+        "## 8. Воспроизводимость",
+        "## 9. Направления развития",
+    ]
+    for heading in required_headings:
+        assert heading in report
+
+    assert "не является вероятностью аварии" in report
+    assert "evaluation также не вызывает" in report

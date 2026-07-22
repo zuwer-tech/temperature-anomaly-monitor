@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 
+from rule_config import RULE_PARAMS
+
 
 # Параметры предобработки (вынесены из тела функции — единая точка настройки).
 # Подобраны так, чтобы работать и на синтетике (несколько датчиков), и на реальных
@@ -239,10 +241,20 @@ def preprocess_data(df, rolling_window=ROLLING_WINDOW):
     df["preliminary_warning"] = 0
 
     df.loc[df["is_missing"] == 1, "preliminary_warning"] = 1
-    df.loc[df["abs_temp_diff"] > 5, "preliminary_warning"] = 1
-    df.loc[df["abs_z_score"] > 3, "preliminary_warning"] = 1
+    df.loc[
+        df["temp_rate_c_per_min"].abs()
+        > RULE_PARAMS["sharp_jump_rate_c_per_min"],
+        "preliminary_warning",
+    ] = 1
+    df.loc[
+        df["abs_z_score"] > RULE_PARAMS["z_score"],
+        "preliminary_warning",
+    ] = 1
     df.loc[df["is_stuck"] == 1, "preliminary_warning"] = 1
-    df.loc[df["abs_diff_from_group_mean"] > 8, "preliminary_warning"] = 1
+    df.loc[
+        df["abs_diff_from_group_mean"] > RULE_PARAMS["group_deviation"],
+        "preliminary_warning",
+    ] = 1
 
     return df
 

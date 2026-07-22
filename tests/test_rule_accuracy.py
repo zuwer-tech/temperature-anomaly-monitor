@@ -7,6 +7,9 @@
 import numpy as np
 import pandas as pd
 
+import anomaly_detection
+import preprocessing
+import rule_config
 from preprocessing import preprocess_data
 from anomaly_detection import detect_anomalies, RULE_PARAMS
 import train_model
@@ -35,6 +38,10 @@ def _full_pipeline(preprocessed_synth, tmp_path):
 
 def test_rule_params_present():
     """Все ключи порогов правил определены — единая точка настройки."""
+    assert RULE_PARAMS is rule_config.RULE_PARAMS
+    assert anomaly_detection.RULE_PARAMS is rule_config.RULE_PARAMS
+    assert preprocessing.RULE_PARAMS is rule_config.RULE_PARAMS
+
     for key in (
         "sharp_jump_rate_c_per_min", "z_score", "group_deviation",
         "overheat_window", "overheat_slope",
@@ -118,3 +125,24 @@ def test_sharp_jump_rule_uses_temperature_rate_not_row_difference():
     assert last_rows.loc["T-FAST", "rule_event_type"] == "Резкий скачок температуры"
     assert last_rows.loc["T-MINUTE", "rule_event_type"] == "Резкий скачок температуры"
     assert last_rows.loc["T-SLOW", "rule_anomaly"] == 0
+
+
+def test_preliminary_and_final_rules_use_same_config(monkeypatch):
+    monkeypatch.setitem(RULE_PARAMS, "sharp_jump_rate_c_per_min", 10.0)
+    raw = pd.DataFrame(
+        {
+            "timestamp": [
+                "2026-01-01 00:00:00",
+                "2026-01-01 00:00:10",
+            ],
+            "sensor_id": ["T-01", "T-01"],
+            "temperature": [70.0, 71.0],
+        }
+    )
+
+    prepared = preprocess_data(raw)
+    results, _ = detect_anomalies(prepared, use_ml=False)
+
+    assert np.isclose(prepared["temp_rate_c_per_min"].iloc[1], 6.0)
+    assert prepared["preliminary_warning"].iloc[1] == 0
+    assert results["rule_anomaly"].iloc[1] == 0

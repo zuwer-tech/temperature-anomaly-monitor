@@ -16,7 +16,8 @@
 > 📖 Подробности: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (как устроено),
 > [docs/DATA.md](docs/DATA.md) (какие данные), [docs/MODEL.md](docs/MODEL.md)
 > (правила и модель), [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)
-> (что уже сделано и что осталось).
+> (что уже сделано и что осталось), [docs/TECHNICAL_REPORT.md](docs/TECHNICAL_REPORT.md)
+> (итоговый технический отчёт).
 
 Перед результатами дашборд показывает активный режим **rules-only** или
 **rules+ML** и «паспорт входной пробы»: число строк и датчиков, пропуски,

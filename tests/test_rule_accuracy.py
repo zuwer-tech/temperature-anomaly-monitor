@@ -206,7 +206,15 @@ def test_ml_only_alarm_has_primary_reason_and_zero_rule_count(
         predictions[0] = -1
         scores = np.zeros(len(features), dtype=float)
         scores[0] = -1.0
-        return features, predictions, scores, True
+        metadata = {
+            "score_calibration": {
+                "score_min": -1.0,
+                "score_max": 1.0,
+                "medium_threshold": 0.60,
+                "high_threshold": 0.85,
+            }
+        }
+        return features, predictions, scores, metadata
 
     monkeypatch.setattr(
         anomaly_detection,

@@ -5,6 +5,7 @@
 'scenario' выступает ground truth, аномалия = scenario != 'normal'.
 """
 import numpy as np
+import pandas as pd
 
 from preprocessing import preprocess_data
 from anomaly_detection import detect_anomalies, RULE_PARAMS
@@ -35,7 +36,7 @@ def _full_pipeline(preprocessed_synth, tmp_path):
 def test_rule_params_present():
     """Все ключи порогов правил определены — единая точка настройки."""
     for key in (
-        "sharp_jump_diff", "z_score", "group_deviation",
+        "sharp_jump_rate_c_per_min", "z_score", "group_deviation",
         "overheat_window", "overheat_slope",
     ):
         assert key in RULE_PARAMS
@@ -82,3 +83,38 @@ def test_overall_f1(preprocessed_full_synth, tmp_path):
     gt = (results["scenario"] != "normal").astype(int).to_numpy()
     *_, precision, recall, f1 = _metrics(pred, gt)
     assert f1 >= 0.60, f"F1={f1:.3f} precision={precision:.3f} recall={recall:.3f}"
+
+
+def test_sharp_jump_rule_uses_temperature_rate_not_row_difference():
+    raw = pd.DataFrame(
+        {
+            "timestamp": [
+                "2026-01-01 00:00:00",
+                "2026-01-01 00:00:10",
+                "2026-01-01 00:00:00",
+                "2026-01-01 00:01:00",
+                "2026-01-01 00:00:00",
+                "2026-01-01 00:10:00",
+            ],
+            "sensor_id": [
+                "T-FAST",
+                "T-FAST",
+                "T-MINUTE",
+                "T-MINUTE",
+                "T-SLOW",
+                "T-SLOW",
+            ],
+            "temperature": [70.0, 71.0, 70.0, 76.0, 70.0, 71.0],
+        }
+    )
+
+    prepared = preprocess_data(raw)
+    results, _ = detect_anomalies(prepared, use_ml=False)
+    last_rows = results.groupby("sensor_id").tail(1).set_index("sensor_id")
+
+    assert np.isclose(last_rows.loc["T-FAST", "temp_rate_c_per_min"], 6.0)
+    assert np.isclose(last_rows.loc["T-MINUTE", "temp_rate_c_per_min"], 6.0)
+    assert np.isclose(last_rows.loc["T-SLOW", "temp_rate_c_per_min"], 0.1)
+    assert last_rows.loc["T-FAST", "rule_event_type"] == "Резкий скачок температуры"
+    assert last_rows.loc["T-MINUTE", "rule_event_type"] == "Резкий скачок температуры"
+    assert last_rows.loc["T-SLOW", "rule_anomaly"] == 0

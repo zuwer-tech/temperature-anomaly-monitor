@@ -8,6 +8,7 @@ from model_schema import (
     SCORE_CALIBRATION_METHOD,
 )
 from rule_config import RULE_PARAMS
+from events import group_anomaly_events
 
 import pandas as pd
 import numpy as np
@@ -522,23 +523,27 @@ if __name__ == "__main__":
     input_file = "preprocessed_temperature_data.csv"
     results_file = "temperature_anomaly_results.csv"
     alarm_log_file = "alarm_log.csv"
+    event_log_file = "event_log.csv"
 
     df = pd.read_csv(input_file)
 
     try:
         results_df, alarm_log = detect_anomalies(df)
+        event_log = group_anomaly_events(results_df)
     except (ModelNotTrainedError, ModelCompatibilityError) as error:
         print(f"Ошибка: {error}", file=sys.stderr)
         raise SystemExit(1) from None
 
     results_df.to_csv(results_file, index=False, encoding="utf-8-sig")
     alarm_log.to_csv(alarm_log_file, index=False, encoding="utf-8-sig")
+    event_log.to_csv(event_log_file, index=False, encoding="utf-8-sig")
 
     print("\nФинальных аномалий найдено:")
     print(results_df["final_anomaly"].sum())
 
     print(f"\nФайл с полными результатами сохранён: {results_file}")
     print(f"Журнал тревог сохранён: {alarm_log_file}")
+    print(f"Журнал событий сохранён: {event_log_file}")
 
     print("\nПервые строки журнала тревог:")
     print(alarm_log.head(20))

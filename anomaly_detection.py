@@ -41,7 +41,7 @@ RETRAIN_COMMANDS = "python preprocessing.py\npython train_model.py"
 # функций. Пороги подобраны так, чтобы минимум ложных тревог на штатном режиме
 # при сохранении высокого полноты по реальным сценариям (см. tests/test_rule_accuracy.py).
 RULE_PARAMS = {
-    "sharp_jump_diff": 5.0,      # |Δt| между соседними точками, °C
+    "sharp_jump_rate_c_per_min": 5.0,  # |ΔT/Δt|, °C/мин
     "z_score": 3.0,             # отклонение от среднего датчика
     "group_deviation": 8.0,      # отклонение от среднего по группе датчиков, °C
     "overheat_window": 20,      # окно для наклона (устойчивый перегрев), точки
@@ -219,7 +219,10 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
     )
 
     # Резкий скачок температуры
-    mask_sharp_jump = df["abs_temp_diff"] > RULE_PARAMS["sharp_jump_diff"]
+    mask_sharp_jump = (
+        df["temp_rate_c_per_min"].abs()
+        > RULE_PARAMS["sharp_jump_rate_c_per_min"]
+    )
 
     df.loc[mask_sharp_jump, "rule_anomaly"] = 1
     df.loc[mask_sharp_jump, "rule_event_type"] = "Резкий скачок температуры"

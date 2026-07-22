@@ -21,6 +21,15 @@ class ModelCompatibilityError(RuntimeError):
 ANALYSIS_MODE_RULES_ONLY = "rules-only"
 ANALYSIS_MODE_RULES_ML = "rules+ML"
 
+PRIMARY_REASON_PRIORITY = (
+    "signal_loss",
+    "sharp_jump",
+    "stuck_sensor",
+    "sustained_overheat",
+    "group_deviation",
+    "z_score",
+)
+
 
 REQUIRED_METADATA_FIELDS = (
     "feature_columns",
@@ -60,6 +69,15 @@ def _record_triggered_rule(df, mask, rule_id):
             *df.at[index, "triggered_rules"],
             rule_id,
         ]
+
+def _select_primary_reason(triggered_rules, iforest_anomaly):
+    """Выбирает главную причину по явному инженерному приоритету."""
+    for reason in PRIMARY_REASON_PRIORITY:
+        if reason in triggered_rules:
+            return reason
+    if iforest_anomaly:
+        return "iforest_anomaly"
+    return None
 
 def _compatibility_error(message):
     return ModelCompatibilityError(
@@ -333,6 +351,14 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
         analysis_mode = ANALYSIS_MODE_RULES_ONLY
 
     df["analysis_mode"] = analysis_mode
+    df["rule_count"] = df["triggered_rules"].map(len)
+    df["primary_reason"] = [
+        _select_primary_reason(rules, iforest_anomaly)
+        for rules, iforest_anomaly in zip(
+            df["triggered_rules"],
+            df["iforest_anomaly"],
+        )
+    ]
 
     # ============================================================
     # 3. ОБЪЕДИНЕНИЕ ПРАВИЛ И ИИ
@@ -387,6 +413,8 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
             "temperature",
             "temperature_filled",
             "triggered_rules",
+            "primary_reason",
+            "rule_count",
             "rule_event_type",
             "rule_risk_level",
             "anomaly_score_norm",

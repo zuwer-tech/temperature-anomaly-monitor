@@ -185,9 +185,50 @@ def test_all_simultaneous_rule_reasons_are_retained():
         "sustained_overheat",
     ]
     assert results.iloc[0]["triggered_rules"] == []
+    assert results.iloc[-1]["primary_reason"] == "signal_loss"
+    assert results.iloc[-1]["rule_count"] == 6
     assert results.iloc[-1]["rule_event_type"] == "Устойчивый перегрев"
     assert (
         results["rule_anomaly"]
         == results["triggered_rules"].map(bool).astype(int)
     ).all()
     assert alarm_log.iloc[-1]["Сработавшие_правила"] == target_rules
+    assert alarm_log.iloc[-1]["primary_reason"] == "signal_loss"
+    assert alarm_log.iloc[-1]["rule_count"] == 6
+
+def test_ml_only_alarm_has_primary_reason_and_zero_rule_count(
+    preprocessed_synth,
+    monkeypatch,
+):
+    """ML-only тревога объясняется моделью, а не выдуманным правилом."""
+    def fake_inference(features, model_dir="models"):
+        predictions = np.ones(len(features), dtype=int)
+        predictions[0] = -1
+        scores = np.zeros(len(features), dtype=float)
+        scores[0] = -1.0
+        return features, predictions, scores, True
+
+    monkeypatch.setattr(
+        anomaly_detection,
+        "_load_or_fit_iforest",
+        fake_inference,
+    )
+
+    results, alarm_log = detect_anomalies(preprocessed_synth)
+    ai_row = results.iloc[0]
+
+    assert ai_row["rule_anomaly"] == 0
+    assert ai_row["iforest_anomaly"] == 1
+    assert ai_row["triggered_rules"] == []
+    assert ai_row["primary_reason"] == "iforest_anomaly"
+    assert ai_row["rule_count"] == 0
+
+    ai_alarm = alarm_log[
+        alarm_log["primary_reason"] == "iforest_anomaly"
+    ].iloc[0]
+    assert ai_alarm["rule_count"] == 0
+    assert ai_alarm["Сработавшие_правила"] == []
+
+    normal_rows = results[results["final_anomaly"] == 0]
+    assert normal_rows["primary_reason"].isna().all()
+    assert (normal_rows["rule_count"] == 0).all()

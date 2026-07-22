@@ -11,7 +11,12 @@ import numpy as np
 import pandas as pd
 
 from anomaly_detection import detect_anomalies
-from train_model import DEFAULT_INPUT, MODEL_DIR, TEST_START, split_train_evaluation
+from train_model import (
+    DEFAULT_INPUT,
+    MODEL_DIR,
+    TEST_START,
+    split_train_evaluation,
+)
 
 
 LAYER_COLUMNS = {
@@ -61,6 +66,90 @@ def binary_classification_metrics(y_true, y_pred):
     }
 
 
+def detection_delay_metrics(evaluation, prediction_column):
+    """Измеряет задержку до первой тревоги для каждого размеченного события."""
+    required_columns = {
+        "timestamp",
+        "sensor_id",
+        "scenario",
+        prediction_column,
+    }
+    missing_columns = sorted(required_columns - set(evaluation.columns))
+    if missing_columns:
+        raise ValueError(
+            "Для расчёта задержки отсутствуют колонки: "
+            f"{', '.join(missing_columns)}."
+        )
+
+    events_df = evaluation[list(required_columns)].copy()
+    events_df["timestamp"] = pd.to_datetime(events_df["timestamp"])
+    events_df[prediction_column] = events_df[prediction_column].astype(int)
+    if not set(events_df[prediction_column].unique()).issubset({0, 1}):
+        raise ValueError(
+            f"{prediction_column} должен содержать только 0 и 1."
+        )
+
+    events_df = events_df.sort_values(
+        ["sensor_id", "timestamp"],
+        kind="stable",
+    ).reset_index(drop=True)
+    previous_scenario = events_df.groupby("sensor_id")["scenario"].shift()
+    starts_new_event = events_df["scenario"].ne(previous_scenario)
+    events_df["_event_id"] = starts_new_event.groupby(
+        events_df["sensor_id"]
+    ).cumsum()
+
+    event_reports = []
+    anomaly_rows = events_df[events_df["scenario"] != "normal"]
+    for (_sensor_id, _event_id), event in anomaly_rows.groupby(
+        ["sensor_id", "_event_id"],
+        sort=False,
+    ):
+        event_start = event["timestamp"].iloc[0]
+        event_end = event["timestamp"].iloc[-1]
+        alarms = event[event[prediction_column] == 1]
+        detected = not alarms.empty
+        first_alarm = alarms["timestamp"].iloc[0] if detected else None
+        delay_seconds = (
+            round((first_alarm - event_start).total_seconds(), 3)
+            if detected
+            else None
+        )
+        event_reports.append(
+            {
+                "sensor_id": str(event["sensor_id"].iloc[0]),
+                "scenario": str(event["scenario"].iloc[0]),
+                "event_start": event_start.isoformat(),
+                "event_end": event_end.isoformat(),
+                "detected": detected,
+                "first_alarm": (
+                    first_alarm.isoformat() if detected else None
+                ),
+                "delay_seconds": delay_seconds,
+            }
+        )
+
+    delays = [
+        event["delay_seconds"]
+        for event in event_reports
+        if event["delay_seconds"] is not None
+    ]
+    detected_events = len(delays)
+    return {
+        "events_total": len(event_reports),
+        "events_detected": detected_events,
+        "events_missed": len(event_reports) - detected_events,
+        "mean_delay_seconds": (
+            round(float(np.mean(delays)), 3) if delays else None
+        ),
+        "median_delay_seconds": (
+            round(float(np.median(delays)), 3) if delays else None
+        ),
+        "max_delay_seconds": max(delays) if delays else None,
+        "events": event_reports,
+    }
+
+
 def evaluate_detection_layers(df, model_dir=MODEL_DIR, test_start=TEST_START):
     """Считает единый отчёт на одной независимой evaluation-выборке."""
     if "scenario" not in df.columns:
@@ -73,15 +162,18 @@ def evaluate_detection_layers(df, model_dir=MODEL_DIR, test_start=TEST_START):
         split_train_evaluation(detected, test_start=test_start)
     )
 
-
     truth = (evaluation["scenario"] != "normal").astype(int)
-    layers = {
-        layer: binary_classification_metrics(
+    layers = {}
+    for layer, column in LAYER_COLUMNS.items():
+        layer_report = binary_classification_metrics(
             truth,
             evaluation[column].astype(int),
         )
-        for layer, column in LAYER_COLUMNS.items()
-    }
+        layer_report["detection_delay"] = detection_delay_metrics(
+            evaluation,
+            column,
+        )
+        layers[layer] = layer_report
 
     return {
         "positive_class": "scenario != normal",

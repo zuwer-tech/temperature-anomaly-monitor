@@ -1,5 +1,6 @@
 import hashlib
 
+import pandas as pd
 import pytest
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
@@ -8,6 +9,7 @@ from anomaly_detection import detect_anomalies
 from evaluation import (
     LAYER_COLUMNS,
     binary_classification_metrics,
+    detection_delay_metrics,
     evaluate_detection_layers,
 )
 import train_model
@@ -39,6 +41,69 @@ def test_binary_metrics_include_all_confusion_matrix_cells():
     }
 
 
+def test_detection_delay_uses_event_start_and_marks_missed_events():
+    evaluation = pd.DataFrame(
+        {
+            "timestamp": [
+                "2026-01-01 00:03:00",
+                "2026-01-01 00:00:00",
+                "2026-01-01 00:05:00",
+                "2026-01-01 00:01:00",
+                "2026-01-01 00:04:00",
+                "2026-01-01 00:00:00",
+            ],
+            "sensor_id": ["T-01", "T-01", "T-01", "T-01", "T-01", "T-02"],
+            "scenario": [
+                "sensor_drift",
+                "normal",
+                "sensor_drift",
+                "sensor_drift",
+                "normal",
+                "sharp_jump",
+            ],
+            "alarm": [1, 0, 0, 0, 0, 1],
+        }
+    )
+
+    report = detection_delay_metrics(evaluation, "alarm")
+
+    assert report["events_total"] == 3
+    assert report["events_detected"] == 2
+    assert report["events_missed"] == 1
+    assert report["mean_delay_seconds"] == 60.0
+    assert report["median_delay_seconds"] == 60.0
+    assert report["max_delay_seconds"] == 120.0
+    assert report["events"] == [
+        {
+            "sensor_id": "T-01",
+            "scenario": "sensor_drift",
+            "event_start": "2026-01-01T00:01:00",
+            "event_end": "2026-01-01T00:03:00",
+            "detected": True,
+            "first_alarm": "2026-01-01T00:03:00",
+            "delay_seconds": 120.0,
+        },
+        {
+            "sensor_id": "T-01",
+            "scenario": "sensor_drift",
+            "event_start": "2026-01-01T00:05:00",
+            "event_end": "2026-01-01T00:05:00",
+            "detected": False,
+            "first_alarm": None,
+            "delay_seconds": None,
+        },
+        {
+            "sensor_id": "T-02",
+            "scenario": "sharp_jump",
+            "event_start": "2026-01-01T00:00:00",
+            "event_end": "2026-01-01T00:00:00",
+            "detected": True,
+            "first_alarm": "2026-01-01T00:00:00",
+            "delay_seconds": 0.0,
+        },
+    ]
+
+
 def test_unified_report_matches_each_pipeline_layer(
     preprocessed_synth,
     tmp_path,
@@ -64,13 +129,23 @@ def test_unified_report_matches_each_pipeline_layer(
     assert set(report["layers"]) == set(LAYER_COLUMNS)
 
     for layer, column in LAYER_COLUMNS.items():
-        assert report["layers"][layer] == binary_classification_metrics(
+        expected_metrics = binary_classification_metrics(
             truth,
             evaluation[column].astype(int),
         )
+        expected_delay = detection_delay_metrics(evaluation, column)
+        assert report["layers"][layer] == {
+            **expected_metrics,
+            "detection_delay": expected_delay,
+        }
         assert sum(
             report["layers"][layer]["confusion_matrix"].values()
         ) == split_info["evaluation_rows"]
+        assert (
+            expected_delay["events_detected"]
+            + expected_delay["events_missed"]
+            == expected_delay["events_total"]
+        )
 
     assert split_info["evaluation_rows"] < len(preprocessed_synth)
 

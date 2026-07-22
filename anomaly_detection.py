@@ -61,7 +61,6 @@ def _record_triggered_rule(df, mask, rule_id):
             rule_id,
         ]
 
-
 def _compatibility_error(message):
     return ModelCompatibilityError(
         f"{message} Переобучите модель:\n{RETRAIN_COMMANDS}"

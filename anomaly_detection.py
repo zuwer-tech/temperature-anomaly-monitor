@@ -3,6 +3,7 @@ import os
 import sys
 
 from model_schema import FEATURE_COLUMNS, METADATA_VERSION
+from rule_config import RULE_PARAMS
 
 import pandas as pd
 import numpy as np
@@ -36,17 +37,6 @@ REQUIRED_METADATA_FIELDS = (
 )
 RETRAIN_COMMANDS = "python preprocessing.py\npython train_model.py"
 
-
-# Единое место настройки порогов правил. Меняйте значения здесь, а не в теле
-# функций. Пороги подобраны так, чтобы минимум ложных тревог на штатном режиме
-# при сохранении высокого полноты по реальным сценариям (см. tests/test_rule_accuracy.py).
-RULE_PARAMS = {
-    "sharp_jump_rate_c_per_min": 5.0,  # |ΔT/Δt|, °C/мин
-    "z_score": 3.0,             # отклонение от среднего датчика
-    "group_deviation": 8.0,      # отклонение от среднего по группе датчиков, °C
-    "overheat_window": 20,      # окно для наклона (устойчивый перегрев), точки
-    "overheat_slope": 0.12,     # наклон rolling_mean, °C/точку
-}
 
 
 def _rolling_slope(series, window):

@@ -15,7 +15,14 @@
 
 > 📖 Подробности: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (как устроено),
 > [docs/DATA.md](docs/DATA.md) (какие данные), [docs/MODEL.md](docs/MODEL.md)
-> (правила и модель).
+> (правила и модель), [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)
+> (что уже сделано и что осталось).
+
+Перед результатами дашборд показывает активный режим **rules-only** или
+**rules+ML** и «паспорт входной пробы»: число строк и датчиков, пропуски,
+дубли и проблемы порядка времени. Отдельная таблица группирует соседние
+аномальные точки в операторские события. Это учебный прототип, а не
+сертифицированная система промышленной безопасности.
 
 ---
 
@@ -45,18 +52,19 @@ streamlit run app.py
 ```
  CSV (timestamp, sensor_id, temperature)
         │
+        ├── data_quality.py        read-only сводка качества
         ▼
- preprocessing.py        признаки: rolling_mean, z-score, is_stuck,
- preprocess_data()       отклонение от группы, temp_diff …
+ preprocessing.py                 признаки и физическая скорость °C/мин
         │
+        ├── rule_config.py         единые пороги инженерных правил
+        ├── model_schema.py        единый порядок ML-признаков
         ▼
- anomaly_detection.py    1) правила → rule_anomaly
- detect_anomalies()      2) Isolation Forest (модель из models/) → iforest_anomaly
-                        3) final_anomaly = правило | ИИ
-                        4) журнал тревог
+ anomaly_detection.py             rules-only или rules+ML без обучения на входном CSV
         │
+        ├── events.py              группировка точек в события
+        ├── evaluation.py          независимые метрики и задержка обнаружения
         ▼
- app.py                  Streamlit-дашборд: графики, anomaly score, журнал тревог
+ app.py                           Streamlit: режим, качество, графики, события, журнал
 ```
 
 Модель Isolation Forest берётся из папки `models/`. Для анализа пользовательского
@@ -76,7 +84,12 @@ python train_model.py        # обучает на scenario=='normal', сохр�
 |---|---|
 | `app.py` | Streamlit-дашборд (веб-интерфейс). |
 | `preprocessing.py` | Предобработка: считает признаки из сырых температур. |
-| `anomaly_detection.py` | Правила + Isolation Forest + журнал тревог. Пороги — в `RULE_PARAMS`. |
+| `anomaly_detection.py` | Правила + заранее обученный Isolation Forest + журнал тревог. |
+| `rule_config.py` | Единая конфигурация порогов правил. |
+| `model_schema.py` | Канонический состав и порядок ML-признаков. |
+| `data_quality.py` | Read-only сводка качества входного CSV. |
+| `events.py` | Группировка соседних аномальных точек в события. |
+| `evaluation.py` | Независимая оценка rules, ML и combined без `fit`. |
 | `train_model.py` | Обучение Isolation Forest на штатном режиме + сохранение в `models/`. |
 | `data_adapters.py` | Приводит реальные данные `Т2.csv` к схеме пайплайна. |
 | `Data.py` | Генератор синтетических данных с разметкой сценариев. |
@@ -101,7 +114,8 @@ python train_model.py        # обучает на scenario=='normal', сохр�
 python Data.py                  # 1. сгенерировать синтетику (synthetic_temperature_data.csv)
 python preprocessing.py          # 2. предобработать -> preprocessed_temperature_data.csv
 python train_model.py            # 3. обучить модель на normal -> models/
-python anomaly_detection.py      # 4. детекция -> temperature_anomaly_results.csv, alarm_log.csv
+python anomaly_detection.py      # 4. детекция -> результаты, тревоги и события
+python evaluation.py --output evaluation_report.json  # 5. независимый отчёт качества
 ```
 
 ### Реальные данные (Т2.csv)
@@ -115,7 +129,7 @@ python data_adapters.py          # Т2.csv -> real_temperature_data.csv (кан�
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-pytest -q
+python -m pytest -q
 ```
 
 ### Обучение в Google Colab (без локального Python)
@@ -149,9 +163,10 @@ timestamp,sensor_id,temperature
 
 - **«Обученная модель не найдена или комплект артефактов неполный»** — в
   `models/` нет `scaler.joblib`, `iforest.joblib` и/или `model_meta.json`.
-  Запустите `python preprocessing.py`, затем `python train_model.py`. До
-  обучения анализ пользовательского CSV не запускается, чтобы исключить data
-  leakage.
+  Для режима **rules+ML** запустите `python preprocessing.py`, затем
+  `python train_model.py`. Либо выберите **rules-only**: он применит только
+  инженерные правила. В обоих режимах входной CSV не используется для
+  обучения, поэтому скрытого data leakage нет.
 - **«Сохранённая модель повреждена или несовместима»** — metadata не читается,
   признаки или их порядок изменились либо scaler/model не соответствуют
   текущему коду. Удалять отдельные файлы недостаточно: заново запустите

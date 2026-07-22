@@ -86,6 +86,7 @@ def preprocess_data(df, rolling_window=ROLLING_WINDOW):
     - rolling_std
     - temp_diff
     - time_diff_seconds
+    - temp_rate_c_per_min
     - abs_temp_diff
     - z_score
     - abs_z_score
@@ -157,6 +158,25 @@ def preprocess_data(df, rolling_window=ROLLING_WINDOW):
     )
 
     df["abs_temp_diff"] = df["temp_diff"].abs()
+
+    # Физическая скорость изменения температуры, °C/мин.
+    # Нулевой/отрицательный интервал и отсутствующие измерения не дают
+    # осмысленной скорости, поэтому результат для них остаётся NaN.
+    previous_temperature = (
+        df.groupby("sensor_id")["temperature"]
+        .shift()
+    )
+    valid_rate_interval = (
+        (df["time_diff_seconds"] > 0)
+        & df["temperature"].notna()
+        & previous_temperature.notna()
+    )
+    df["temp_rate_c_per_min"] = np.nan
+    df.loc[valid_rate_interval, "temp_rate_c_per_min"] = (
+        df.loc[valid_rate_interval, "temp_diff"]
+        * 60
+        / df.loc[valid_rate_interval, "time_diff_seconds"]
+    )
 
     # Z-score: скользящий (локальный) — отклонение от собственного rolling_mean.
     # Раньше считался по глобальному среднему всего датчика: на растущем реальном

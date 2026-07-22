@@ -146,3 +146,48 @@ def test_preliminary_and_final_rules_use_same_config(monkeypatch):
     assert np.isclose(prepared["temp_rate_c_per_min"].iloc[1], 6.0)
     assert prepared["preliminary_warning"].iloc[1] == 0
     assert results["rule_anomaly"].iloc[1] == 0
+
+def test_all_simultaneous_rule_reasons_are_retained():
+    """Одна точка хранит все причины, а не только последнее правило."""
+    row_count = 20
+    frame = pd.DataFrame(
+        {
+            "timestamp": pd.date_range(
+                "2026-01-01",
+                periods=row_count,
+                freq="1min",
+            ),
+            "sensor_id": ["T-ALL"] * row_count,
+            "temperature": 70.0 + np.arange(row_count),
+            "temperature_filled": 70.0 + np.arange(row_count),
+            "is_missing": [0] * (row_count - 1) + [1],
+            "temp_rate_c_per_min": [0.0] * (row_count - 1) + [6.0],
+            "abs_z_score": [0.0] * (row_count - 1) + [4.0],
+            "is_stuck": [0] * (row_count - 1) + [1],
+            "abs_diff_from_group_mean": (
+                [0.0] * (row_count - 1) + [9.0]
+            ),
+            "temp_diff": [0.0] * row_count,
+            "rolling_mean": np.arange(row_count, dtype=float),
+            "scenario": ["normal"] * (row_count - 1) + ["combined_fault"],
+        }
+    )
+
+    results, alarm_log = detect_anomalies(frame, use_ml=False)
+    target_rules = results.iloc[-1]["triggered_rules"]
+
+    assert target_rules == [
+        "signal_loss",
+        "sharp_jump",
+        "z_score",
+        "stuck_sensor",
+        "group_deviation",
+        "sustained_overheat",
+    ]
+    assert results.iloc[0]["triggered_rules"] == []
+    assert results.iloc[-1]["rule_event_type"] == "Устойчивый перегрев"
+    assert (
+        results["rule_anomaly"]
+        == results["triggered_rules"].map(bool).astype(int)
+    ).all()
+    assert alarm_log.iloc[-1]["Сработавшие_правила"] == target_rules

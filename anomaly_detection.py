@@ -53,6 +53,14 @@ def _rolling_slope(series, window):
     return series.rolling(window=window, min_periods=window).apply(_slope, raw=True)
 
 
+def _record_triggered_rule(df, mask, rule_id):
+    """Добавляет идентификатор правила, не стирая уже найденные причины."""
+    for index in df.index[mask.fillna(False)]:
+        df.at[index, "triggered_rules"] = [
+            *df.at[index, "triggered_rules"],
+            rule_id,
+        ]
+
 def _compatibility_error(message):
     return ModelCompatibilityError(
         f"{message} Переобучите модель:\n{RETRAIN_COMMANDS}"
@@ -194,12 +202,14 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
     # ============================================================
 
     df["rule_anomaly"] = 0
+    df["triggered_rules"] = [[] for _ in range(len(df))]
     df["rule_event_type"] = "normal"
     df["rule_risk_level"] = "Normal"
     df["rule_recommendation"] = "Наблюдение в штатном режиме"
 
     # Потеря сигнала
     mask_missing = df["is_missing"] == 1
+    _record_triggered_rule(df, mask_missing, "signal_loss")
 
     df.loc[mask_missing, "rule_anomaly"] = 1
     df.loc[mask_missing, "rule_event_type"] = "Потеря сигнала"
@@ -213,6 +223,7 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
         df["temp_rate_c_per_min"].abs()
         > RULE_PARAMS["sharp_jump_rate_c_per_min"]
     )
+    _record_triggered_rule(df, mask_sharp_jump, "sharp_jump")
 
     df.loc[mask_sharp_jump, "rule_anomaly"] = 1
     df.loc[mask_sharp_jump, "rule_event_type"] = "Резкий скачок температуры"
@@ -223,6 +234,7 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
 
     # Сильное отклонение от обычного режима датчика
     mask_z_score = df["abs_z_score"] > RULE_PARAMS["z_score"]
+    _record_triggered_rule(df, mask_z_score, "z_score")
 
     df.loc[mask_z_score, "rule_anomaly"] = 1
     df.loc[mask_z_score, "rule_event_type"] = "Сильное отклонение от нормы"
@@ -233,6 +245,7 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
 
     # Зависший датчик
     mask_stuck = df["is_stuck"] == 1
+    _record_triggered_rule(df, mask_stuck, "stuck_sensor")
 
     df.loc[mask_stuck, "rule_anomaly"] = 1
     df.loc[mask_stuck, "rule_event_type"] = "Зависание датчика"
@@ -243,6 +256,7 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
 
     # Отклонение от группы датчиков
     mask_group_deviation = df["abs_diff_from_group_mean"] > RULE_PARAMS["group_deviation"]
+    _record_triggered_rule(df, mask_group_deviation, "group_deviation")
 
     df.loc[mask_group_deviation, "rule_anomaly"] = 1
     df.loc[mask_group_deviation, "rule_event_type"] = "Отклонение от группы датчиков"
@@ -272,6 +286,7 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
     # Устойчивый перегрев — крутой наклон на коротком окне (slow_overheating,
     # correlated_growth).
     mask_overheat = df["temp_slope_overheat"] > RULE_PARAMS["overheat_slope"]
+    _record_triggered_rule(df, mask_overheat, "sustained_overheat")
     df.loc[mask_overheat, "rule_anomaly"] = 1
     df.loc[mask_overheat, "rule_event_type"] = "Устойчивый перегрев"
     df.loc[mask_overheat, "rule_risk_level"] = "Warning"
@@ -371,6 +386,7 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
             "sensor_id",
             "temperature",
             "temperature_filled",
+            "triggered_rules",
             "rule_event_type",
             "rule_risk_level",
             "anomaly_score_norm",
@@ -385,6 +401,7 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
         "sensor_id": "Датчик",
         "temperature": "Температура",
         "temperature_filled": "Температура_заполненная",
+        "triggered_rules": "Сработавшие_правила",
         "rule_event_type": "Тип_события",
         "rule_risk_level": "Уровень",
         "anomaly_score_norm": "Anomaly_score",

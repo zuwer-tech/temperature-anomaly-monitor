@@ -3,6 +3,7 @@ import streamlit as st
 import plotly.express as px
 
 from preprocessing import preprocess_data
+from data_quality import build_data_quality_report
 from events import group_anomaly_events
 from anomaly_detection import (
     ANALYSIS_MODE_RULES_ML,
@@ -52,6 +53,7 @@ data_source = st.sidebar.radio(
 
 if data_source == "Демонстрационные данные":
     df, alarm_log = load_demo_data()
+    data_quality_report = build_data_quality_report(df)
     st.sidebar.info("Используются демонстрационные данные проекта.")
 
 else:
@@ -78,6 +80,7 @@ else:
 
     try:
         preprocessed_df = preprocess_data(raw_df)
+        data_quality_report = build_data_quality_report(raw_df)
     except TypeError as error:
         st.error(f"Некорректный формат входных данных: {error}")
         st.stop()
@@ -143,6 +146,30 @@ elif active_mode == ANALYSIS_MODE_RULES_ONLY:
 else:
     st.error(f"Неизвестный режим анализа: {active_mode}")
     st.stop()
+
+st.markdown("### Качество входных данных")
+quality_columns = st.columns(4)
+quality_columns[0].metric("Строк измерений", data_quality_report["row_count"])
+quality_columns[1].metric("Датчиков", data_quality_report["sensor_count"])
+quality_columns[2].metric(
+    "Пропусков температуры",
+    f'{data_quality_report["missing_temperature_count"]} '
+    f'({data_quality_report["missing_temperature_percent"]:.1f}%)',
+)
+quality_columns[3].metric(
+    "Повторных измерений", data_quality_report["duplicate_measurement_count"]
+)
+if data_quality_report["status"] == "good":
+    st.success("Явных ограничений качества входных данных не найдено.")
+else:
+    st.warning(
+        "Ограничения входных данных:\n\n- "
+        + "\n- ".join(data_quality_report["warnings"])
+    )
+st.caption(
+    "Эта сводка описывает качество входной пробы данных, "
+    "а не уверенность или безопасность решения модели."
+)
 
 event_log = group_anomaly_events(df)
 

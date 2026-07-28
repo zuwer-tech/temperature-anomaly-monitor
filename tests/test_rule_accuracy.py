@@ -187,6 +187,8 @@ def test_all_simultaneous_rule_reasons_are_retained():
     assert results.iloc[0]["triggered_rules"] == []
     assert results.iloc[-1]["primary_reason"] == "signal_loss"
     assert results.iloc[-1]["rule_count"] == 6
+    assert results.iloc[-1]["rule_risk_level"] == "High"
+    assert "решение об остановке" in results.iloc[-1]["rule_recommendation"]
     assert results.iloc[-1]["rule_event_type"] == "Устойчивый перегрев"
     assert (
         results["rule_anomaly"]

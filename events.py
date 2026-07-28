@@ -4,6 +4,8 @@ import ast
 import numpy as np
 import pandas as pd
 
+from risk_config import RISK_RANK
+
 
 EVENT_COLUMNS = (
     "event_id",
@@ -18,12 +20,6 @@ EVENT_COLUMNS = (
     "recommendation",
 )
 
-RISK_RANK = {
-    "Normal": 0,
-    "Warning": 1,
-    "Medium": 2,
-    "High": 3,
-}
 
 
 def _reason_values(value):

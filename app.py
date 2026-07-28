@@ -5,6 +5,7 @@ import plotly.express as px
 from preprocessing import preprocess_data
 from data_quality import build_data_quality_report
 from events import group_anomaly_events
+from explanations import build_alert_explanation
 from anomaly_detection import (
     ANALYSIS_MODE_RULES_ML,
     ANALYSIS_MODE_RULES_ONLY,
@@ -584,6 +585,51 @@ with tab4:
             hide_index=True
         )
 
+        st.markdown("### 🔎 Объяснение выбранной тревоги")
+
+        def alarm_label(index):
+            alarm = table_df.iloc[index]
+            return (
+                f'{alarm["Время"]} · {alarm["Датчик"]} · '
+                f'{alarm["Тип_события"]}'
+            )
+
+        selected_alarm_index = st.selectbox(
+            "Выберите тревогу:",
+            options=range(len(table_df)),
+            format_func=alarm_label,
+        )
+        selected_alarm = table_df.iloc[selected_alarm_index]
+        selected_time = pd.to_datetime(selected_alarm["Время"])
+        matching_rows = filtered_df[
+            (filtered_df["sensor_id"] == selected_alarm["Датчик"])
+            & (filtered_df["timestamp"] == selected_time)
+        ]
+        selected_result = matching_rows.iloc[0] if not matching_rows.empty else None
+        explanation = build_alert_explanation(selected_alarm, selected_result)
+
+        explanation_columns = st.columns(3)
+        explanation_columns[0].metric("Датчик", explanation["sensor"])
+        explanation_columns[1].metric("Уровень", explanation["risk"])
+        explanation_columns[2].metric("Время", str(explanation["timestamp"]))
+        st.write(f'**Что произошло:** {explanation["event_type"]}')
+        st.markdown(
+            "**Почему сработала тревога:**\n\n"
+            + "\n".join(f"- {reason}" for reason in explanation["reasons"])
+        )
+        if explanation["features"]:
+            st.write("**Какие признаки это подтверждают:**")
+            st.dataframe(
+                pd.DataFrame(explanation["features"]),
+                use_container_width=True,
+                hide_index=True,
+            )
+        st.write(f'**Что дала ML-модель:** {explanation["ml_summary"]}')
+        st.info(f'Рекомендация: {explanation["recommendation"]}')
+        st.caption(
+            "Карточка объясняет сигнал учебного прототипа. "
+            "Решение принимает оператор по технологическому регламенту."
+        )
         csv_data = table_df.to_csv(index=False).encode("utf-8-sig")
 
         st.download_button(

@@ -19,7 +19,8 @@
 > (что уже сделано и что осталось), [docs/TECHNICAL_REPORT.md](docs/TECHNICAL_REPORT.md)
 > (итоговый технический отчёт), [docs/PRESENTATION.md](docs/PRESENTATION.md)
 > (структура защиты) и [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md)
-> (демонстрационный сценарий на 5–10 минут).
+> (демонстрационный сценарий на 5–10 минут) и [docs/BASELINE.md](docs/BASELINE.md)
+> (как восстановить проверенную версию).
 
 Перед результатами дашборд показывает активный режим **rules-only** или
 **rules+ML** и «паспорт входной пробы»: число строк и датчиков, пропуски,

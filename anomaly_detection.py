@@ -8,6 +8,7 @@ from model_schema import (
     SCORE_CALIBRATION_METHOD,
 )
 from rule_config import RULE_PARAMS
+from risk_config import assess_risk
 from events import group_anomaly_events
 
 import pandas as pd
@@ -298,8 +299,6 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
     df["rule_anomaly"] = 0
     df["triggered_rules"] = [[] for _ in range(len(df))]
     df["rule_event_type"] = "normal"
-    df["rule_risk_level"] = "Normal"
-    df["rule_recommendation"] = "Наблюдение в штатном режиме"
 
     # Потеря сигнала
     mask_missing = df["is_missing"] == 1
@@ -307,10 +306,6 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
 
     df.loc[mask_missing, "rule_anomaly"] = 1
     df.loc[mask_missing, "rule_event_type"] = "Потеря сигнала"
-    df.loc[mask_missing, "rule_risk_level"] = "Medium"
-    df.loc[mask_missing, "rule_recommendation"] = (
-        "Проверить канал измерения и наличие связи с датчиком"
-    )
 
     # Резкий скачок температуры
     mask_sharp_jump = (
@@ -321,10 +316,6 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
 
     df.loc[mask_sharp_jump, "rule_anomaly"] = 1
     df.loc[mask_sharp_jump, "rule_event_type"] = "Резкий скачок температуры"
-    df.loc[mask_sharp_jump, "rule_risk_level"] = "High"
-    df.loc[mask_sharp_jump, "rule_recommendation"] = (
-        "Проверить показания датчика и сравнить с соседними каналами"
-    )
 
     # Сильное отклонение от обычного режима датчика
     mask_z_score = df["abs_z_score"] > RULE_PARAMS["z_score"]
@@ -332,10 +323,6 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
 
     df.loc[mask_z_score, "rule_anomaly"] = 1
     df.loc[mask_z_score, "rule_event_type"] = "Сильное отклонение от нормы"
-    df.loc[mask_z_score, "rule_risk_level"] = "Warning"
-    df.loc[mask_z_score, "rule_recommendation"] = (
-        "Проверить тренд температуры и устойчивость отклонения"
-    )
 
     # Зависший датчик
     mask_stuck = df["is_stuck"] == 1
@@ -343,10 +330,6 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
 
     df.loc[mask_stuck, "rule_anomaly"] = 1
     df.loc[mask_stuck, "rule_event_type"] = "Зависание датчика"
-    df.loc[mask_stuck, "rule_risk_level"] = "Medium"
-    df.loc[mask_stuck, "rule_recommendation"] = (
-        "Проверить исправность датчика и цепь передачи данных"
-    )
 
     # Отклонение от группы датчиков
     mask_group_deviation = df["abs_diff_from_group_mean"] > RULE_PARAMS["group_deviation"]
@@ -354,10 +337,6 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
 
     df.loc[mask_group_deviation, "rule_anomaly"] = 1
     df.loc[mask_group_deviation, "rule_event_type"] = "Отклонение от группы датчиков"
-    df.loc[mask_group_deviation, "rule_risk_level"] = "Warning"
-    df.loc[mask_group_deviation, "rule_recommendation"] = (
-        "Сравнить показания с соседними температурными каналами"
-    )
 
     # Медленный перегрев / устойчивый рост.
     # rolling_temp_diff_mean_20 остаётся как признак для Isolation Forest.
@@ -383,10 +362,6 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
     _record_triggered_rule(df, mask_overheat, "sustained_overheat")
     df.loc[mask_overheat, "rule_anomaly"] = 1
     df.loc[mask_overheat, "rule_event_type"] = "Устойчивый перегрев"
-    df.loc[mask_overheat, "rule_risk_level"] = "Warning"
-    df.loc[mask_overheat, "rule_recommendation"] = (
-        "Проверить устойчивость роста температуры и сравнить с соседними датчиками"
-    )
 
     # ============================================================
     # 2. ISOLATION FOREST
@@ -449,31 +424,26 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
     )
 
     df.loc[mask_ai_only, "rule_event_type"] = "Нетипичное поведение по ИИ-модели"
-    df.loc[mask_ai_only, "rule_risk_level"] = "Warning"
-    df.loc[mask_ai_only, "rule_recommendation"] = (
-        "Проверить участок графика и сравнить с другими температурными каналами"
-    )
 
-    # Уточнение уровня риска по anomaly score
-    mask_high_score = df["anomaly_score_norm"] > risk_high_threshold
-
-    df.loc[
-        (df["final_anomaly"] == 1) & mask_high_score,
-        "rule_risk_level"
-    ] = "High"
-
-    mask_medium_score = (
-        (df["anomaly_score_norm"] > risk_medium_threshold) &
-        (df["anomaly_score_norm"] <= risk_high_threshold)
-    )
-
-    df.loc[
-        (df["final_anomaly"] == 1) &
-        mask_medium_score &
-        (df["rule_risk_level"] == "Normal"),
-        "rule_risk_level"
-    ] = "Medium"
-
+    # Единая матрица выбирает самый высокий риск из всех независимых сигналов.
+    risk_assessments = [
+        assess_risk(
+            rules,
+            iforest_anomaly=iforest_anomaly,
+            anomaly_score_norm=score,
+            medium_threshold=risk_medium_threshold,
+            high_threshold=risk_high_threshold,
+        )
+        for rules, iforest_anomaly, score in zip(
+            df["triggered_rules"],
+            df["iforest_anomaly"],
+            df["anomaly_score_norm"],
+        )
+    ]
+    df["rule_risk_level"] = [level for level, _ in risk_assessments]
+    df["rule_recommendation"] = [
+        recommendation for _, recommendation in risk_assessments
+    ]
     # ============================================================
     # 4. ЖУРНАЛ ТРЕВОГ
     # ============================================================

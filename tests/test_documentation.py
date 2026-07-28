@@ -1,4 +1,5 @@
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
@@ -68,6 +69,13 @@ def test_defense_materials_support_repeatable_demo():
 
     assert presentation.is_file()
     assert presentation.read_bytes()[:2] == b"PK"
+    with ZipFile(presentation) as deck:
+        slide_files = [
+            name
+            for name in deck.namelist()
+            if name.startswith("ppt/slides/slide") and name.endswith(".xml")
+        ]
+    assert len(slide_files) == 8
     assert "Структура 8 слайдов" in outline
     for step in ["качество", "график", "alarm", "объяснение", "event log", "ограничения"]:
         assert step in demo

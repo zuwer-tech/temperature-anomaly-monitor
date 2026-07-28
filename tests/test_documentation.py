@@ -83,3 +83,14 @@ def test_defense_materials_support_repeatable_demo():
     assert "Резервный сценарий" in demo
     assert "[docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md)" in readme
     assert "[docs/PRESENTATION.md](docs/PRESENTATION.md)" in readme
+
+def test_stable_baseline_is_documented():
+    baseline = (ROOT / "docs" / "BASELINE.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "# Стабильная версия v1.0.0" in baseline
+    assert "git fetch --tags" in baseline
+    assert "git switch --detach v1.0.0" in baseline
+    assert "python -m pytest -q" in baseline
+    assert "модельные артефакты" in baseline
+    assert "[docs/BASELINE.md](docs/BASELINE.md)" in readme

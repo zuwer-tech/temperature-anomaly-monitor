@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 
+from data_quality import apply_duplicate_measurement_policy
 from rule_config import RULE_PARAMS
 
 
@@ -42,7 +43,7 @@ def validate_input_data(df):
     if df.empty:
         raise ValueError("Input DataFrame must contain at least one row.")
 
-    parsed_timestamps = pd.to_datetime(df["timestamp"], errors="coerce")
+    parsed_timestamps = pd.to_datetime(df["timestamp"], errors="coerce", format="mixed")
     invalid_timestamp_count = int(parsed_timestamps.isna().sum())
     if invalid_timestamp_count:
         raise ValueError(
@@ -99,7 +100,8 @@ def preprocess_data(df, rolling_window=ROLLING_WINDOW):
 
     validate_input_data(df)
 
-    df = df.copy()
+    # Resolve duplicate keys before diff() and rolling feature calculations.
+    df = apply_duplicate_measurement_policy(df)
 
     # Если нет колонки scenario, добавляем ее для пользовательских данных
     if "scenario" not in df.columns:

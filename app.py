@@ -160,6 +160,12 @@ quality_columns[2].metric(
 quality_columns[3].metric(
     "Повторных измерений", data_quality_report["duplicate_measurement_count"]
 )
+if data_quality_report["duplicate_measurement_count"]:
+    st.caption(
+        "Политика дублей: "
+        + data_quality_report["duplicate_measurement_action"]
+        + "."
+    )
 if data_quality_report["status"] == "good":
     st.success("Явных ограничений качества входных данных не найдено.")
 else:

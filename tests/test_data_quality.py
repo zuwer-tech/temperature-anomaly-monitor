@@ -30,12 +30,15 @@ def test_report_counts_allowed_quality_limitations():
         "temperature": [70.0, np.nan, 72.0, np.nan, np.nan],
     })
     report = build_data_quality_report(df)
-    assert report["status"] == "warning"
+    assert report["status"] == "error"
     assert report["row_count"] == 5
     assert report["sensor_count"] == 2
     assert report["missing_temperature_count"] == 3
     assert report["missing_temperature_percent"] == 60.0
     assert report["duplicate_measurement_count"] == 1
+    assert report["exact_duplicate_measurement_count"] == 0
+    assert report["conflicting_duplicate_key_count"] == 1
+    assert "останавливают анализ" in report["duplicate_measurement_action"]
     assert report["out_of_order_count"] == 1
     assert report["fully_missing_sensor_count"] == 1
     assert len(report["warnings"]) == 4

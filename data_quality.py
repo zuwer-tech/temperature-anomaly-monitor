@@ -4,6 +4,71 @@ import pandas as pd
 
 
 REQUIRED_COLUMNS = ("timestamp", "sensor_id", "temperature")
+DUPLICATE_MEASUREMENT_POLICY = "drop_exact_error_on_conflict"
+DUPLICATE_MEASUREMENT_ACTION = (
+    "полностью одинаковые строки сворачиваются в одну; различающиеся строки "
+    "с одинаковыми sensor_id и timestamp останавливают анализ"
+)
+
+
+def _normalized_duplicate_frame(df, valid_keys=None):
+    """Return a copy with normalized fields used by the duplicate key."""
+    normalized = df.copy(deep=True)
+    normalized["timestamp"] = pd.to_datetime(
+        normalized["timestamp"], errors="coerce", format="mixed"
+    )
+    normalized["sensor_id"] = (
+        normalized["sensor_id"].astype("string").str.strip()
+    )
+    normalized["temperature"] = pd.to_numeric(
+        normalized["temperature"], errors="coerce"
+    )
+    if valid_keys is not None:
+        normalized = normalized.loc[valid_keys].copy()
+    return normalized
+
+
+def _duplicate_summary(df, valid_keys):
+    normalized = _normalized_duplicate_frame(df, valid_keys=valid_keys)
+    key_columns = ["sensor_id", "timestamp"]
+    duplicate_count = int(
+        normalized.duplicated(key_columns, keep="first").sum()
+    )
+    exact_duplicate_count = int(normalized.duplicated(keep="first").sum())
+
+    without_exact = normalized.drop_duplicates(keep="first")
+    conflict_mask = without_exact.duplicated(key_columns, keep=False)
+    conflicting_key_count = int(
+        without_exact.loc[conflict_mask, key_columns].drop_duplicates().shape[0]
+    )
+    return duplicate_count, exact_duplicate_count, conflicting_key_count
+
+
+def apply_duplicate_measurement_policy(df):
+    """Drop exact repeats and reject ambiguous measurements.
+
+    The input is copied. ``sensor_id`` is stripped and ``timestamp`` is parsed
+    before the duplicate key is evaluated. The function is intended to run
+    after ordinary input validation and before time/rolling features.
+    """
+    normalized = _normalized_duplicate_frame(df)
+    without_exact = normalized.drop_duplicates(keep="first")
+    key_columns = ["sensor_id", "timestamp"]
+    conflict_mask = without_exact.duplicated(key_columns, keep=False)
+
+    if conflict_mask.any():
+        examples = without_exact.loc[conflict_mask, key_columns].drop_duplicates()
+        sample = ", ".join(
+            f"{row.sensor_id} @ {row.timestamp}"
+            for row in examples.head(3).itertuples(index=False)
+        )
+        raise ValueError(
+            "Обнаружены конфликтующие повторные измерения: для одинаковых "
+            "sensor_id + timestamp строки различаются. Исправьте CSV вместо "
+            f"автоматического выбора или усреднения. Примеры: {sample}."
+        )
+
+    return without_exact.reset_index(drop=True)
 
 
 def build_data_quality_report(df):
@@ -33,8 +98,8 @@ def build_data_quality_report(df):
         "sensor_id": keys[valid_keys],
         "timestamp": timestamps[valid_keys],
     })
-    duplicates = int(
-        measurements.duplicated(["sensor_id", "timestamp"], keep="first").sum()
+    duplicates, exact_duplicates, conflicting_keys = _duplicate_summary(
+        df, valid_keys
     )
     out_of_order = int(
         measurements.groupby("sensor_id", sort=False)["timestamp"]
@@ -64,15 +129,29 @@ def build_data_quality_report(df):
         )
     if empty_sensors:
         warnings.append(f"Датчиков без единого измеренного значения: {empty_sensors}.")
-    if duplicates:
-        warnings.append(f"Повторных строк для одного датчика и времени: {duplicates}.")
+    if exact_duplicates:
+        warnings.append(
+            f"Полностью совпадающих повторных строк: {exact_duplicates}; "
+            "перед расчётом признаков будет оставлена одна строка."
+        )
+    if conflicting_keys:
+        warnings.append(
+            f"Конфликтующих ключей sensor_id + timestamp: {conflicting_keys}; "
+            "анализ будет остановлен, поскольку строки различаются."
+        )
     if out_of_order:
         warnings.append(
             f"Переходов назад по времени: {out_of_order}; "
             "перед анализом строки были отсортированы."
         )
 
-    blocking = rows == 0 or invalid_times > 0 or missing_ids > 0 or non_numeric > 0
+    blocking = (
+        rows == 0
+        or invalid_times > 0
+        or missing_ids > 0
+        or non_numeric > 0
+        or conflicting_keys > 0
+    )
     return {
         "status": "error" if blocking else ("warning" if warnings else "good"),
         "row_count": rows,
@@ -80,6 +159,10 @@ def build_data_quality_report(df):
         "missing_temperature_count": missing_temperatures,
         "missing_temperature_percent": missing_percent,
         "duplicate_measurement_count": duplicates,
+        "exact_duplicate_measurement_count": exact_duplicates,
+        "conflicting_duplicate_key_count": conflicting_keys,
+        "duplicate_measurement_policy": DUPLICATE_MEASUREMENT_POLICY,
+        "duplicate_measurement_action": DUPLICATE_MEASUREMENT_ACTION,
         "out_of_order_count": out_of_order,
         "fully_missing_sensor_count": empty_sensors,
         "invalid_timestamp_count": invalid_times,

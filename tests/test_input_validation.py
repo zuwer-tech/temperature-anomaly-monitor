@@ -208,7 +208,7 @@ def test_time_diff_seconds_is_calculated_per_sensor_after_sorting():
     )
 
 
-def test_temperature_rate_uses_real_interval_and_handles_zero_interval():
+def test_temperature_rate_uses_real_interval():
     df = pd.DataFrame(
         {
             "timestamp": [
@@ -216,25 +216,15 @@ def test_temperature_rate_uses_real_interval_and_handles_zero_interval():
                 "2026-01-01 00:00:10",
                 "2026-01-01 00:00:00",
                 "2026-01-01 00:10:00",
-                "2026-01-01 00:00:00",
-                "2026-01-01 00:00:00",
             ],
-            "sensor_id": [
-                "T-FAST",
-                "T-FAST",
-                "T-SLOW",
-                "T-SLOW",
-                "T-ZERO",
-                "T-ZERO",
-            ],
-            "temperature": [70.0, 71.0, 70.0, 71.0, 70.0, 71.0],
+            "sensor_id": ["T-FAST", "T-FAST", "T-SLOW", "T-SLOW"],
+            "temperature": [70.0, 71.0, 70.0, 71.0],
         }
     )
 
     result = preprocess_data(df)
     fast = result[result["sensor_id"] == "T-FAST"]
     slow = result[result["sensor_id"] == "T-SLOW"]
-    zero = result[result["sensor_id"] == "T-ZERO"]
 
     np.testing.assert_allclose(
         fast["temp_rate_c_per_min"],
@@ -246,5 +236,16 @@ def test_temperature_rate_uses_real_interval_and_handles_zero_interval():
         [np.nan, 0.1],
         equal_nan=True,
     )
-    assert zero["time_diff_seconds"].iloc[1] == 0
-    assert zero["temp_rate_c_per_min"].isna().all()
+
+
+def test_zero_interval_with_different_temperatures_is_rejected():
+    df = pd.DataFrame(
+        {
+            "timestamp": ["2026-01-01 00:00:00"] * 2,
+            "sensor_id": ["T-ZERO", "T-ZERO"],
+            "temperature": [70.0, 71.0],
+        }
+    )
+
+    with pytest.raises(ValueError, match="конфликтующие повторные измерения"):
+        preprocess_data(df)

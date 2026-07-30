@@ -54,12 +54,13 @@ def test_constraints_exactly_pin_and_cover_direct_dependencies():
 
 def test_unused_seaborn_is_not_installed():
     all_requirements = "\n".join(
-        _requirement_lines(filename)
+        requirement
         for filename in (
             "requirements.txt",
             "requirements-dev.txt",
             "constraints.txt",
         )
+        for requirement in _requirement_lines(filename)
     ).lower()
     assert "seaborn" not in all_requirements
 

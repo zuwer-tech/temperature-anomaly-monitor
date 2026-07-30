@@ -53,6 +53,7 @@ jobs:
           path: coverage.json
           if-no-files-found: error
           retention-days: 14
+
       - name: Run key pipeline in a temporary directory
         shell: bash
         run: |

@@ -18,11 +18,35 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install dependencies
+      - name: Install reproducible dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
+          python -m pip install --upgrade "pip==26.2"
+          python -m pip install \
+            -r requirements.txt \
+            -r requirements-dev.txt \
+            -c constraints.txt
+
+      - name: Check dependency consistency
+        run: python -m pip check
 
       - name: Run tests
         run: python -m pytest -q
+
+      - name: Run key pipeline in a temporary directory
+        shell: bash
+        run: |
+          workspace="$PWD"
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+          cp synthetic_temperature_data.csv "$tmpdir/"
+          cd "$tmpdir"
+          python "$workspace/preprocessing.py"
+          python "$workspace/train_model.py"
+          python "$workspace/anomaly_detection.py"
+          python "$workspace/evaluation.py" --output evaluation_report.json
+          test -s preprocessed_temperature_data.csv
+          test -s models/model_meta.json
+          test -s temperature_anomaly_results.csv
+          test -s alarm_log.csv
+          test -s event_log.csv
+          test -s evaluation_report.json

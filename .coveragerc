@@ -1,0 +1,12 @@
+[run]
+branch = True
+source = .
+omit =
+    tests/*
+    notebooks/*
+    pages/*
+
+[report]
+show_missing = True
+skip_covered = False
+precision = 1

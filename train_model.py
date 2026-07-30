@@ -28,6 +28,7 @@ from model_schema import (
     RISK_HIGH_THRESHOLD,
     RISK_MEDIUM_THRESHOLD,
     SCORE_CALIBRATION_METHOD,
+    prepare_ml_features,
 )
 
 import numpy as np
@@ -46,22 +47,9 @@ SPLIT_STRATEGY = "time"
 
 
 def prepare_features(df):
-    """Добавляет rolling_temp_diff_mean_20 (как в detect_anomalies) и возвращает X.
-
-    preprocessed_temperature_data.csv содержит все признаки кроме
-    rolling_temp_diff_mean_20 — он считается на этапе детекции. Чтобы обучать
-    модель на тех же признаках, что используются при инференсе, считаем его
-    здесь идентично.
-    """
-    df = df.copy()
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-    df = df.sort_values(by=["sensor_id", "timestamp"]).reset_index(drop=True)
-    df["rolling_temp_diff_mean_20"] = (
-        df.groupby("sensor_id")["temp_diff"]
-        .transform(lambda x: x.rolling(window=20, min_periods=1).mean())
-    )
-    X = df[list(FEATURE_COLUMNS)].replace([np.inf, -np.inf], np.nan).fillna(0)
-    return df, X
+    """Готовит тот же безопасный ML-вход, что и detect_anomalies."""
+    prepared, X, _ml_eligible = prepare_ml_features(df)
+    return prepared, X
 
 
 def _normal_mask(df):
@@ -93,7 +81,12 @@ def split_train_evaluation(df, test_start=TEST_START):
     prepared_df, X = prepare_features(df)
     boundary = pd.Timestamp(test_start)
     normal_mask, used_normal = _normal_mask(prepared_df)
-    train_mask = (prepared_df["timestamp"] < boundary) & normal_mask
+    ml_eligible = prepared_df.index.isin(X.index)
+    train_mask = (
+        (prepared_df["timestamp"] < boundary)
+        & normal_mask
+        & ml_eligible
+    )
     evaluation_mask = prepared_df["timestamp"] >= boundary
 
     if not train_mask.any():
@@ -109,8 +102,12 @@ def split_train_evaluation(df, test_start=TEST_START):
 
     train_df = prepared_df.loc[train_mask].copy()
     evaluation_df = prepared_df.loc[evaluation_mask].copy()
-    X_train = X.loc[train_mask].copy()
-    X_evaluation = X.loc[evaluation_mask].copy()
+    X_train = X.loc[train_df.index].copy()
+    evaluation_ml_index = X.index.intersection(
+        evaluation_df.index,
+        sort=False,
+    )
+    X_evaluation = X.loc[evaluation_ml_index].copy()
 
     if "scenario" in evaluation_df.columns:
         evaluation_normal_rows = int(
@@ -176,10 +173,11 @@ def evaluate(df, scaler, model):
     _train_df, evaluation_df, _X_train, X_evaluation, split_info = (
         split_train_evaluation(df)
     )
-    pred = pd.Series(
-        (model.predict(scaler.transform(X_evaluation)) == -1).astype(int),
-        index=evaluation_df.index,
-    )
+    pred = pd.Series(0, index=evaluation_df.index, dtype=int)
+    if not X_evaluation.empty:
+        pred.loc[X_evaluation.index] = (
+            model.predict(scaler.transform(X_evaluation)) == -1
+        ).astype(int)
     report = {
         "iforest_anomalies": int(pred.sum()),
         "train_rows": split_info["train_rows"],

@@ -293,9 +293,12 @@ def test_detect_anomalies_uses_saved_model(preprocessed_synth, tmp_path):
 
     # Прямое предсказание сохранённой моделью
     _, X = train_model.prepare_features(preprocessed_synth)
-    expected = (model.predict(scaler.transform(X)) == -1).astype(int)
+    expected = pd.Series(0, index=results.index, dtype=int)
+    expected.loc[X.index] = (
+        model.predict(scaler.transform(X)) == -1
+    ).astype(int)
     np.testing.assert_array_equal(
-        results["iforest_anomaly"].to_numpy(), expected
+        results["iforest_anomaly"].to_numpy(), expected.to_numpy()
     )
     assert {
         "iforest_prediction",
@@ -334,6 +337,9 @@ def test_rules_only_mode_skips_model_and_marks_scores_unavailable(
     assert (results["iforest_anomaly"] == 0).all()
     assert results["iforest_prediction"].isna().all()
     assert results["anomaly_score_norm"].isna().all()
+    assert set(results["ml_inference_status"].unique()) == {
+        model_schema.ML_STATUS_NOT_APPLIED_RULES_ONLY
+    }
     pd.testing.assert_series_equal(
         results["final_anomaly"],
         results["rule_anomaly"],
@@ -659,10 +665,11 @@ def test_evaluate_uses_only_evaluation_rows(preprocessed_synth):
     )
     report = train_model.evaluate(preprocessed_synth, scaler, model)
 
-    expected_pred = (
+    expected_pred = pd.Series(0, index=evaluation_df.index, dtype=int)
+    expected_pred.loc[X_evaluation.index] = (
         model.predict(scaler.transform(X_evaluation)) == -1
     ).astype(int)
-    expected_gt = (evaluation_df["scenario"] != "normal").astype(int).to_numpy()
+    expected_gt = (evaluation_df["scenario"] != "normal").astype(int)
     assert report["iforest_anomalies"] == int(expected_pred.sum())
     assert report["tp"] == int(((expected_pred == 1) & (expected_gt == 1)).sum())
     assert report["fp"] == int(((expected_pred == 1) & (expected_gt == 0)).sum())

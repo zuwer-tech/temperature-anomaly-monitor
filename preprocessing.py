@@ -128,8 +128,7 @@ def preprocess_data(df, rolling_window=ROLLING_WINDOW):
     # Заполнение пропусков внутри каждого датчика
     df["temperature_filled"] = (
         df.groupby("sensor_id")["temperature"]
-        .ffill()
-        .bfill()
+        .transform(lambda values: values.ffill().bfill())
     )
 
     # Полностью пустой канал остаётся NaN: отсутствие измерения не является 0 °C.

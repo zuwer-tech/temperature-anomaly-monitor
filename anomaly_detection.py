@@ -6,6 +6,10 @@ from model_schema import (
     FEATURE_COLUMNS,
     METADATA_VERSION,
     SCORE_CALIBRATION_METHOD,
+    ML_STATUS_APPLIED,
+    ML_STATUS_NOT_APPLIED_RULES_ONLY,
+    ML_STATUS_SKIPPED_MISSING_TEMPERATURE,
+    prepare_ml_features,
 )
 from rule_config import RULE_PARAMS
 from risk_config import assess_risk
@@ -259,6 +263,9 @@ def _load_or_fit_iforest(X, model_dir="models"):
     scaler = _load_joblib_artifact(artifacts["scaler.joblib"], "scaler.joblib")
     model = _load_joblib_artifact(artifacts["iforest.joblib"], "iforest.joblib")
     _validate_model_objects(scaler, model)
+    if X.empty:
+        empty_scaled = np.empty((0, len(FEATURE_COLUMNS)))
+        return empty_scaled, np.array([], dtype=int), np.array([]), metadata
     X_scaled = scaler.transform(X)
     predictions = model.predict(X_scaled)
     score_raw = model.decision_function(X_scaled)
@@ -368,24 +375,40 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
     # ============================================================
 
     if use_ml:
-        X = df[list(FEATURE_COLUMNS)].replace(
-            [np.inf, -np.inf], np.nan
-        ).fillna(0)
+        df, X, _ml_eligible = prepare_ml_features(df)
+        (
+            _X_scaled,
+            iforest_prediction,
+            iforest_score_raw,
+            metadata,
+        ) = _load_or_fit_iforest(X, model_dir=model_dir)
 
-        _X_scaled, iforest_prediction, iforest_score_raw, metadata = (
-            _load_or_fit_iforest(X, model_dir=model_dir)
+        df["iforest_prediction"] = np.nan
+        df["iforest_anomaly"] = 0
+        df["iforest_score_raw"] = np.nan
+        df["anomaly_score"] = np.nan
+        df["anomaly_score_norm"] = np.nan
+        df["ml_inference_status"] = (
+            ML_STATUS_SKIPPED_MISSING_TEMPERATURE
         )
 
-        df["iforest_prediction"] = iforest_prediction
-        df["iforest_anomaly"] = (df["iforest_prediction"] == -1).astype(int)
-        df["iforest_score_raw"] = iforest_score_raw
-        df["anomaly_score"] = -df["iforest_score_raw"]
+        if not X.empty:
+            df.loc[X.index, "iforest_prediction"] = iforest_prediction
+            df.loc[X.index, "iforest_anomaly"] = (
+                iforest_prediction == -1
+            ).astype(int)
+            df.loc[X.index, "iforest_score_raw"] = iforest_score_raw
+            anomaly_score = -iforest_score_raw
+            df.loc[X.index, "anomaly_score"] = anomaly_score
+            df.loc[X.index, "anomaly_score_norm"] = (
+                _normalize_anomaly_score(
+                    anomaly_score,
+                    metadata["score_calibration"],
+                )
+            )
+            df.loc[X.index, "ml_inference_status"] = ML_STATUS_APPLIED
 
         calibration = metadata["score_calibration"]
-        df["anomaly_score_norm"] = _normalize_anomaly_score(
-            df["anomaly_score"],
-            calibration,
-        ).fillna(0)
         risk_medium_threshold = calibration["medium_threshold"]
         risk_high_threshold = calibration["high_threshold"]
         analysis_mode = ANALYSIS_MODE_RULES_ML
@@ -395,6 +418,7 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
         df["iforest_score_raw"] = np.nan
         df["anomaly_score"] = np.nan
         df["anomaly_score_norm"] = np.nan
+        df["ml_inference_status"] = ML_STATUS_NOT_APPLIED_RULES_ONLY
         risk_medium_threshold = np.nan
         risk_high_threshold = np.nan
         analysis_mode = ANALYSIS_MODE_RULES_ONLY
@@ -464,6 +488,7 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
             "anomaly_score_norm",
             "rule_recommendation",
             "scenario",
+            "ml_inference_status",
             "analysis_mode",
         ]
     ]
@@ -479,6 +504,7 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
         "anomaly_score_norm": "Anomaly_score",
         "rule_recommendation": "Рекомендация",
         "scenario": "Истинный_сценарий",
+        "ml_inference_status": "Статус_ML",
         "analysis_mode": "Режим_анализа",
     })
 

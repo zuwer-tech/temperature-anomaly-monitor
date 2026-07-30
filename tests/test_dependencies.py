@@ -92,7 +92,6 @@ def test_readme_documents_both_installation_modes():
         in readme
     )
 
-
 def test_coverage_config_and_ci_report_branches():
     dev_requirements = _requirement_lines("requirements-dev.txt")
     assert any(
@@ -102,11 +101,19 @@ def test_coverage_config_and_ci_report_branches():
 
     coverage_config = (ROOT / ".coveragerc").read_text(encoding="utf-8")
     assert "branch = True" in coverage_config
+    assert "fail_under = 50" in coverage_config
     for omitted_path in ("tests/*", "notebooks/*", "pages/*"):
         assert omitted_path in coverage_config
 
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(
         encoding="utf-8"
     )
-    for option in (`n        "--cov=.",`n        "--cov-branch",`n        "--cov-report=term-missing",`n        "--cov-report=json:coverage.json",`n        "--cov-fail-under=50",`n    ):
-        assert option in workflow`n    assert "actions/upload-artifact@v4" in workflow
+    for option in (
+        "--cov=.",
+        "--cov-branch",
+        "--cov-report=term-missing",
+        "--cov-report=json:coverage.json",
+        "--cov-fail-under=50",
+    ):
+        assert option in workflow
+    assert "actions/upload-artifact@v4" in workflow

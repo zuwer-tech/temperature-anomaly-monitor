@@ -43,7 +43,7 @@ def validate_input_data(df):
     if df.empty:
         raise ValueError("Input DataFrame must contain at least one row.")
 
-    parsed_timestamps = pd.to_datetime(df["timestamp"], errors="coerce")
+    parsed_timestamps = pd.to_datetime(df["timestamp"], errors="coerce", format="mixed")
     invalid_timestamp_count = int(parsed_timestamps.isna().sum())
     if invalid_timestamp_count:
         raise ValueError(

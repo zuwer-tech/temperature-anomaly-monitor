@@ -117,3 +117,6 @@ def test_coverage_config_and_ci_report_branches():
     ):
         assert option in workflow
     assert "actions/upload-artifact@v4" in workflow
+
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert "coverage.json" in gitignore

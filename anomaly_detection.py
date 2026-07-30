@@ -6,7 +6,11 @@ from model_schema import (
     FEATURE_COLUMNS,
     METADATA_VERSION,
     SCORE_CALIBRATION_METHOD,
-    ML_STATUS_APPLIED,`n    ML_STATUS_NOT_APPLIED_RULES_ONLY,`n    ML_STATUS_SKIPPED_MISSING_TEMPERATURE,`n    prepare_ml_features,`n)
+    ML_STATUS_APPLIED,
+    ML_STATUS_NOT_APPLIED_RULES_ONLY,
+    ML_STATUS_SKIPPED_MISSING_TEMPERATURE,
+    prepare_ml_features,
+)
 from rule_config import RULE_PARAMS
 from risk_config import assess_risk
 from events import group_anomaly_events
@@ -484,7 +488,8 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
             "anomaly_score_norm",
             "rule_recommendation",
             "scenario",
-            "ml_inference_status",`n            "analysis_mode",
+            "ml_inference_status",
+            "analysis_mode",
         ]
     ]
 
@@ -499,7 +504,8 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
         "anomaly_score_norm": "Anomaly_score",
         "rule_recommendation": "Рекомендация",
         "scenario": "Истинный_сценарий",
-        "ml_inference_status": "Статус_ML",`n        "analysis_mode": "Режим_анализа",
+        "ml_inference_status": "Статус_ML",
+        "analysis_mode": "Режим_анализа",
     })
 
     alarm_log["Температура"] = alarm_log["Температура"].round(2)

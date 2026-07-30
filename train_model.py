@@ -21,7 +21,6 @@
 """
 import json
 import os
-import warnings
 
 from model_schema import (
     FEATURE_COLUMNS,
@@ -66,21 +65,20 @@ def prepare_features(df):
 
 
 def _normal_mask(df):
-    """Маска строк штатного режима для обучения."""
-    if "scenario" in df.columns:
-        mask = df["scenario"] == "normal"
-        if mask.sum() == 0:
-            warnings.warn(
-                "Нет строк со scenario=='normal' — обучаю на всех данных "
-                "(риск data leakage)."
-            )
-            return pd.Series(True, index=df.index), False
-        return mask, True
-    warnings.warn(
-        "Нет колонки scenario — обучаю на всех данных (риск data leakage). "
-        "Запустите Data.py / preprocessing.py, чтобы получить разметку."
-    )
-    return pd.Series(True, index=df.index), False
+    """Возвращает только подтверждённые normal-строки или останавливает обучение."""
+    if "scenario" not in df.columns:
+        raise ValueError(
+            "Обучение разрешено только на подтверждённых normal-данных: "
+            "отсутствует обязательная колонка scenario."
+        )
+
+    mask = df["scenario"] == "normal"
+    if not mask.any():
+        raise ValueError(
+            "Обучение разрешено только на подтверждённых normal-данных: "
+            "нет строк scenario == 'normal'."
+        )
+    return mask, True
 
 
 def split_train_evaluation(df, test_start=TEST_START):

@@ -33,19 +33,29 @@
 
 ## Быстрый старт (для новичков)
 
-Нужен Python 3.10+.
+Нужен Python 3.12 — именно эта версия проверяется в CI и используется для
+строго воспроизводимого окружения.
 
 ```bash
 # 1. создать виртуальное окружение
 python3 -m venv .venv
 source .venv/bin/activate          # на Windows: .venv\Scripts\activate
 
-# 2. установить зависимости
-pip install -r requirements.txt
+# 2a. обычная установка в проверенных major-диапазонах
+python -m pip install -r requirements.txt
+
+# 2b. ИЛИ строго воспроизводимая установка с точными версиями
+python -m pip install -r requirements.txt -c constraints.txt
 
 # 3. запустить дашборд
 streamlit run app.py
 ```
+
+На шаге 2 выберите только один режим. `requirements.txt` допускает совместимые
+обновления внутри текущих major-версий. `constraints.txt` фиксирует весь
+разрешённый набор точными версиями — как лабораторный регламент с конкретными
+партиями реактивов. CI всегда использует строгий режим и дополнительно запускает
+`python -m pip check`.
 
 В браузере откроется дашборд с демонстрационными данными. Слева в боковой
 панели можно переключиться на «Загрузить свой CSV» и загрузить свой файл.
@@ -146,7 +156,12 @@ python data_adapters.py          # Т2.csv -> real_temperature_data.csv (кан�
 ### Тесты
 
 ```bash
-pip install -r requirements.txt -r requirements-dev.txt
+# обычный режим
+python -m pip install -r requirements.txt -r requirements-dev.txt
+
+# или точные версии, как в CI
+python -m pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt
+python -m pip check
 python -m pytest -q
 ```
 

@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 
+from data_quality import apply_duplicate_measurement_policy
 from rule_config import RULE_PARAMS
 
 
@@ -99,7 +100,8 @@ def preprocess_data(df, rolling_window=ROLLING_WINDOW):
 
     validate_input_data(df)
 
-    df = df.copy()
+    # Resolve duplicate keys before diff() and rolling feature calculations.
+    df = apply_duplicate_measurement_policy(df)
 
     # Если нет колонки scenario, добавляем ее для пользовательских данных
     if "scenario" not in df.columns:

@@ -8,6 +8,7 @@
 """
 import json
 import hashlib
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -131,6 +132,51 @@ def _write_bundle(tmp_path, metadata=None, scaler=None, model=None):
     with open(tmp_path / "model_meta.json", "w", encoding="utf-8") as fh:
         json.dump(_valid_metadata() if metadata is None else metadata, fh)
 
+
+def test_missing_scenario_stops_training_without_fallback_warning(
+    preprocessed_synth,
+):
+    unlabelled = preprocessed_synth.drop(columns=["scenario"])
+
+    with warnings.catch_warnings(record=True) as caught_warnings:
+        warnings.simplefilter("always")
+        with pytest.raises(
+            ValueError,
+            match="подтверждённых normal-данных.*scenario",
+        ):
+            train_model.train(unlabelled)
+
+    assert caught_warnings == []
+
+
+def test_dataset_without_normal_rows_stops_training(preprocessed_synth):
+    anomalies_only = preprocessed_synth.copy()
+    anomalies_only["scenario"] = "sharp_jump"
+
+    with pytest.raises(
+        ValueError,
+        match="нет строк scenario == 'normal'",
+    ):
+        train_model.train(anomalies_only)
+
+
+def test_failed_main_creates_no_model_artifacts(
+    preprocessed_synth,
+    tmp_path,
+    monkeypatch,
+):
+    invalid_input = tmp_path / "without_scenario.csv"
+    preprocessed_synth.drop(columns=["scenario"]).to_csv(
+        invalid_input,
+        index=False,
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ValueError, match="подтверждённых normal-данных"):
+        train_model.main(input_file=str(invalid_input))
+
+    model_dir = tmp_path / "models"
+    assert not model_dir.exists() or list(model_dir.iterdir()) == []
 
 def test_train_uses_normal_only(preprocessed_synth):
     """Модель должна обучаться на 720 ранних normal-строках."""

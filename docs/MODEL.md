@@ -31,6 +31,9 @@
 - Обучается **только на ранних строках `scenario == 'normal'`**
   (`train_model.train()`), чтобы учить штатный режим, а аномалии становились
   «нетипичными».
+- Если колонки `scenario` нет или в ней нет ни одной строки `normal`, обучение
+  останавливается с `ValueError` до `fit` и до записи файлов модели. Небезопасного
+  fallback на все строки нет: неизвестную смесь нельзя считать штатным baseline.
 - Сохраняется: `models/scaler.joblib`, `models/iforest.joblib`,
   `models/model_meta.json`.
 - `detect_anomalies()` загружает сохранённую модель (`transform`/`predict`,

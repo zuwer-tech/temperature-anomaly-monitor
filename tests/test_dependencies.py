@@ -91,3 +91,32 @@ def test_readme_documents_both_installation_modes():
         "python -m pip install -r requirements.txt -c constraints.txt"
         in readme
     )
+
+def test_coverage_config_and_ci_report_branches():
+    dev_requirements = _requirement_lines("requirements-dev.txt")
+    assert any(
+        _package_name(requirement) == "pytest-cov"
+        for requirement in dev_requirements
+    )
+
+    coverage_config = (ROOT / ".coveragerc").read_text(encoding="utf-8")
+    assert "branch = True" in coverage_config
+    assert "fail_under = 50" in coverage_config
+    for omitted_path in ("tests/*", "notebooks/*", "pages/*"):
+        assert omitted_path in coverage_config
+
+    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(
+        encoding="utf-8"
+    )
+    for option in (
+        "--cov=.",
+        "--cov-branch",
+        "--cov-report=term-missing",
+        "--cov-report=json:coverage.json",
+        "--cov-fail-under=50",
+    ):
+        assert option in workflow
+    assert "actions/upload-artifact@v4" in workflow
+
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert "coverage.json" in gitignore

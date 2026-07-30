@@ -29,8 +29,30 @@ jobs:
       - name: Check dependency consistency
         run: python -m pip check
 
-      - name: Run tests
-        run: python -m pytest -q
+      - name: Run tests with branch coverage
+        run: python -m pytest --cov=. --cov-branch --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=50
+
+      - name: Print line and branch coverage totals
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          totals = json.loads(Path("coverage.json").read_text())["totals"]
+          line_rate = 100 * totals["covered_lines"] / totals["num_statements"]
+          branch_rate = 100 * totals["covered_branches"] / totals["num_branches"]
+          print(f"Line coverage: {line_rate:.1f}%")
+          print(f"Branch coverage: {branch_rate:.1f}%")
+          PY
+
+      - name: Upload machine-readable coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Run key pipeline in a temporary directory
         shell: bash

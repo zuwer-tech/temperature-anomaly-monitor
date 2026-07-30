@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from train_model import evaluate, save_model, train
+from anomaly_detection import _load_or_fit_iforest
+from train_model import evaluate, prepare_features, save_model, train
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -44,6 +45,9 @@ def train_demo_model(
             "Обучение завершилось без полного комплекта артефактов: "
             + ", ".join(missing)
         )
+
+    _prepared_df, feature_frame = prepare_features(training_df)
+    _load_or_fit_iforest(feature_frame.head(1), model_dir=str(model_dir))
 
     return {
         "dataset_path": str(dataset_path),

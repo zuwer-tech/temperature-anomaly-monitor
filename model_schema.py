@@ -17,7 +17,7 @@ FEATURE_COLUMNS = (
     "is_missing",
     "is_stuck",
     "abs_diff_from_group_mean",
-    "rolling_temp_rate_mean",
+    "rolling_temp_diff_mean_20",
 )
 
 ML_STATUS_APPLIED = "applied"
@@ -77,7 +77,7 @@ def prepare_ml_features(df):
         * 60
         / interval.loc[positive_interval]
     )
-    prepared["rolling_temp_rate_mean"] = causal_time_rolling(
+    prepared["rolling_temp_diff_mean_20"] = causal_time_rolling(
         prepared,
         rate_column,
         RULE_PARAMS["overheat_duration_seconds"],

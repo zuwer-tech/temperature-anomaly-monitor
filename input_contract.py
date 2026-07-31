@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 
@@ -153,7 +154,14 @@ def inspect_measurement_metadata(df):
         accuracy_declared_count = int(declared.sum())
         numeric_accuracy = pd.to_numeric(accuracy, errors="coerce")
         invalid_accuracy_count = int(
-            (declared & (numeric_accuracy.isna() | numeric_accuracy.lt(0))).sum()
+            (
+                declared
+                & (
+                    numeric_accuracy.isna()
+                    | numeric_accuracy.lt(0)
+                    | ~np.isfinite(numeric_accuracy)
+                )
+            ).sum()
         )
 
     quality_flags = []
@@ -190,6 +198,6 @@ def validate_measurement_metadata(df):
     if invalid_accuracy_count:
         raise ValueError(
             "sensor_accuracy содержит "
-            f"{invalid_accuracy_count} нечисловых или отрицательных значений."
+            f"{invalid_accuracy_count} нечисловых, отрицательных или бесконечных значений."
         )
     return metadata

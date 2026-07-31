@@ -44,7 +44,6 @@ def prepare_ml_features(df):
         "sensor_id",
         "temperature",
         "temp_diff",
-        "time_diff_seconds",
         *FEATURE_COLUMNS[:-1],
     }
     missing_columns = sorted(required_columns.difference(df.columns))
@@ -62,11 +61,11 @@ def prepare_ml_features(df):
     # Физическая скорость заполненного сигнала сохраняет прежний минутный
     # benchmark, но корректно масштабируется при другой частоте измерений.
     # Первая точка не имеет предыдущего интервала и получает структурный 0.
-    interval = pd.to_numeric(prepared["time_diff_seconds"], errors="coerce")
+    interval = prepared.groupby("sensor_id")["timestamp"].diff().dt.total_seconds()
     invalid_interval = interval.notna() & (interval <= 0)
     if invalid_interval.any():
         raise ValueError(
-            "Невозможно подготовить ML-признаки: time_diff_seconds содержит "
+            "Невозможно подготовить ML-признаки: timestamp содержит "
             "нулевой или отрицательный интервал."
         )
     rate_column = "_temp_rate_filled_c_per_min"

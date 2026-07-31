@@ -77,15 +77,19 @@ def test_large_time_gap_resets_stuck_and_rolling_history():
         {
             "timestamp": before.append(after),
             "sensor_id": "T-GAP",
-            "temperature": 70.0,
+            "temperature": [70.0] * len(before) + [90.0],
         }
     )
 
     prepared = preprocess_data(raw)
     assert prepared["is_stuck"].iloc[-2] == 1
     assert prepared["is_stuck"].iloc[-1] == 0
-    assert prepared["rolling_mean"].iloc[-1] == 70.0
+    assert prepared["rolling_mean"].iloc[-1] == 90.0
     assert prepared["rolling_std"].iloc[-1] == 1e-6
+    assert np.isnan(prepared["temp_rate_c_per_min"].iloc[-1])
+
+    with_ml_feature, _features, _eligible = prepare_ml_features(prepared)
+    assert with_ml_feature["rolling_temp_diff_mean_20"].iloc[-1] == 0.0
 
 
 def test_future_rows_do_not_change_past_features_or_rules():

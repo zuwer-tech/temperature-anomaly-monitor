@@ -44,7 +44,10 @@ def test_rule_params_present():
 
     for key in (
         "sharp_jump_rate_c_per_min", "z_score", "group_deviation",
-        "overheat_window", "overheat_slope",
+        "rolling_duration_seconds", "stuck_duration_seconds",
+        "stuck_score_duration_seconds", "overheat_duration_seconds",
+        "overheat_slope_c_per_min", "continuity_gap_seconds",
+        "stuck_abs_tolerance",
     ):
         assert key in RULE_PARAMS
 

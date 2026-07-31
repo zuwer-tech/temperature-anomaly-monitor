@@ -3,6 +3,9 @@
 import numpy as np
 import pandas as pd
 
+from rule_config import RULE_PARAMS
+from time_windows import causal_time_rolling
+
 
 FEATURE_COLUMNS = (
     "temperature_filled",
@@ -25,7 +28,7 @@ SCORE_CALIBRATION_METHOD = "training_baseline_min_max"
 RISK_MEDIUM_THRESHOLD = 0.60
 RISK_HIGH_THRESHOLD = 0.85
 
-METADATA_VERSION = 2
+METADATA_VERSION = 3
 
 
 def prepare_ml_features(df):
@@ -55,10 +58,37 @@ def prepare_ml_features(df):
     prepared = prepared.sort_values(
         by=["sensor_id", "timestamp"]
     ).reset_index(drop=True)
-    prepared["rolling_temp_diff_mean_20"] = (
-        prepared.groupby("sensor_id")["temp_diff"]
-        .transform(lambda values: values.rolling(window=20, min_periods=1).mean())
+    # Физическая скорость заполненного сигнала сохраняет прежний минутный
+    # benchmark, но корректно масштабируется при другой частоте измерений.
+    # Первая точка не имеет предыдущего интервала и получает структурный 0.
+    interval = prepared.groupby("sensor_id")["timestamp"].diff().dt.total_seconds()
+    invalid_interval = interval.notna() & (interval <= 0)
+    if invalid_interval.any():
+        raise ValueError(
+            "Невозможно подготовить ML-признаки: timestamp содержит "
+            "нулевой или отрицательный интервал."
+        )
+    rate_column = "_temp_rate_filled_c_per_min"
+    prepared[rate_column] = 0.0
+    # Первая точка после большого разрыва начинает новый физический участок:
+    # скорость через неизвестный промежуток не переносится в ML-окно.
+    positive_interval = (
+        (interval > 0)
+        & (interval <= RULE_PARAMS["continuity_gap_seconds"])
     )
+    prepared.loc[positive_interval, rate_column] = (
+        prepared.loc[positive_interval, "temp_diff"]
+        * 60
+        / interval.loc[positive_interval]
+    )
+    prepared["rolling_temp_diff_mean_20"] = causal_time_rolling(
+        prepared,
+        rate_column,
+        RULE_PARAMS["overheat_duration_seconds"],
+        "mean",
+        RULE_PARAMS["continuity_gap_seconds"],
+    )
+    prepared = prepared.drop(columns=rate_column)
 
     temperature = pd.to_numeric(prepared["temperature"], errors="coerce")
     invalid_temperature = prepared["temperature"].notna() & temperature.isna()

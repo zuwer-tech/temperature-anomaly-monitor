@@ -1,7 +1,7 @@
 """Тесты объединения mod_AI_2 с основным пайплайном (PR #7).
 
 Проверяем ключевые исправления для реальных данных:
-- правило зависания не ловит ступени квантования АЦП (точное равенство + min-run);
+- правило зависания не ловит ступени квантования АЦП (точное равенство + физическая длительность);
 - настоящее зависание ловится;
 - для одного датчика group-правило использует отклонение от rolling_mean;
 - на реальном Т2.csv доля ложных «зависаний» низкая (регрессия к mod_AI_2).
@@ -9,7 +9,8 @@
 import numpy as np
 import pandas as pd
 
-from preprocessing import preprocess_data, STUCK_MIN_RUN
+from preprocessing import preprocess_data
+from rule_config import RULE_PARAMS
 
 
 def _make_df(temps, sensor_id="T-01"):
@@ -22,7 +23,7 @@ def _make_df(temps, sensor_id="T-01"):
 
 def test_stuck_ignores_quantization():
     """Короткие повторы значения (ступени квантования) — НЕ зависание."""
-    # Плавный рост, квантованный до 0.5°: каждое значение повторяется 3 раза (< min_run).
+    # Плавный рост, квантованный до 0.5°: каждое значение повторяется 3 раза (короче физического порога).
     levels = np.repeat(np.arange(50, 70, 0.5), 3)
     df = preprocess_data(_make_df(levels))
     assert df["is_stuck"].sum() == 0, "квантованные ступени не должны считаться зависанием"
@@ -32,7 +33,7 @@ def test_stuck_detects_true_stall():
     """Длинный застывший участок — зависание."""
     temps = np.concatenate([
         np.linspace(50, 60, 40),
-        np.full(STUCK_MIN_RUN + 5, 60.0),   # застыл на 15 одинаковых
+        np.full(int(RULE_PARAMS["stuck_duration_seconds"]) + 5, 60.0),
         np.linspace(60, 65, 20),
     ])
     df = preprocess_data(_make_df(temps))

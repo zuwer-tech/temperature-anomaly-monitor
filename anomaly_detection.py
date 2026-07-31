@@ -12,6 +12,7 @@ from model_schema import (
     prepare_ml_features,
 )
 from rule_config import RULE_PARAMS
+from time_windows import causal_time_slope
 from risk_config import assess_risk
 from events import group_anomaly_events
 
@@ -57,20 +58,6 @@ REQUIRED_METADATA_FIELDS = (
 )
 RETRAIN_COMMANDS = "python preprocessing.py\npython train_model.py"
 
-
-
-def _rolling_slope(series, window):
-    """Скользящий наклон линии тренда (линейная регрессия по окну).
-
-    Считается по сглаженному rolling_mean (а не по сырой температуре), чтобы
-    шум не порождал ложных срабатываний. Возвращает NaN, пока окно не накопилось.
-    """
-    def _slope(y):
-        if len(y) < window:
-            return np.nan
-        x = np.arange(len(y), dtype=float)
-        return np.polyfit(x, y, 1)[0]
-    return series.rolling(window=window, min_periods=window).apply(_slope, raw=True)
 
 
 def _record_triggered_rule(df, mask, rule_id):
@@ -345,27 +332,21 @@ def detect_anomalies(df, model_dir="models", use_ml=True):
     df.loc[mask_group_deviation, "rule_anomaly"] = 1
     df.loc[mask_group_deviation, "rule_event_type"] = "Отклонение от группы датчиков"
 
-    # Медленный перегрев / устойчивый рост.
-    # rolling_temp_diff_mean_20 остаётся как признак для Isolation Forest.
-    df["rolling_temp_diff_mean_20"] = (
-        df.groupby("sensor_id")["temp_diff"]
-        .transform(lambda x: x.rolling(window=20, min_periods=1).mean())
+    # Наклон сглаженной температуры считается по фактическому времени, °C/мин.
+    # Окно причинное: текущая и прошлые точки. Разрыв длиннее допустимого
+    # начинает новый участок, поэтому неизвестный промежуток не выдаётся за
+    # устойчивый физический рост.
+    df["temp_slope_overheat"] = causal_time_slope(
+        df,
+        "rolling_mean",
+        RULE_PARAMS["overheat_duration_seconds"],
+        RULE_PARAMS["continuity_gap_seconds"],
     )
 
-    # Наклон сглаженной температуры ловит устойчивый перегрев, который простые
-    # пороги пропускают (slow_overheating, correlated_growth). Считается по
-    # сглаженному rolling_mean, чтобы шум не порождал ложных срабатываний.
-    # Медленный дрейф датчика (sensor_drift) этим правилом намеренно не ловится:
-    # его наклон ниже пика нормальной синусоиды, поэтому правилом от нормы не
-    # отделить — его берёт на себя Isolation Forest (см. train_model.py).
-    df["temp_slope_overheat"] = (
-        df.groupby("sensor_id")["rolling_mean"]
-        .transform(lambda x: _rolling_slope(x, window=RULE_PARAMS["overheat_window"]))
+    mask_overheat = (
+        df["temp_slope_overheat"]
+        > RULE_PARAMS["overheat_slope_c_per_min"]
     )
-
-    # Устойчивый перегрев — крутой наклон на коротком окне (slow_overheating,
-    # correlated_growth).
-    mask_overheat = df["temp_slope_overheat"] > RULE_PARAMS["overheat_slope"]
     _record_triggered_rule(df, mask_overheat, "sustained_overheat")
     df.loc[mask_overheat, "rule_anomaly"] = 1
     df.loc[mask_overheat, "rule_event_type"] = "Устойчивый перегрев"

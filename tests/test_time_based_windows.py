@@ -86,7 +86,7 @@ def test_large_time_gap_resets_stuck_and_rolling_history():
     assert prepared["is_stuck"].iloc[-1] == 0
     assert prepared["rolling_mean"].iloc[-1] == 90.0
     assert prepared["rolling_std"].iloc[-1] == 1e-6
-    assert np.isnan(prepared["temp_rate_c_per_min"].iloc[-1])
+    assert prepared["temp_rate_c_per_min"].iloc[-1] == 0.4
 
     with_ml_feature, _features, _eligible = prepare_ml_features(prepared)
     assert with_ml_feature["rolling_temp_diff_mean_20"].iloc[-1] == 0.0

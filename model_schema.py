@@ -70,7 +70,12 @@ def prepare_ml_features(df):
         )
     rate_column = "_temp_rate_filled_c_per_min"
     prepared[rate_column] = 0.0
-    positive_interval = interval > 0
+    # Первая точка после большого разрыва начинает новый физический участок:
+    # скорость через неизвестный промежуток не переносится в ML-окно.
+    positive_interval = (
+        (interval > 0)
+        & (interval <= RULE_PARAMS["continuity_gap_seconds"])
+    )
     prepared.loc[positive_interval, rate_column] = (
         prepared.loc[positive_interval, "temp_diff"]
         * 60

@@ -71,7 +71,7 @@ def causal_time_slope(
 
     for segment in _causal_segments(frame, max_gap_seconds):
         timestamps = pd.DatetimeIndex(pd.to_datetime(segment["timestamp"]))
-        seconds = timestamps.asi8.astype(float) / 1_000_000_000
+        seconds = (timestamps - timestamps[0]).total_seconds().to_numpy(dtype=float)
         values = pd.to_numeric(segment[value_column], errors="coerce").to_numpy(float)
         left = 0
         for right in range(len(segment)):
@@ -109,7 +109,7 @@ def causal_stuck_flags(
     result = pd.Series(0, index=frame.index, dtype=int)
     for segment in _causal_segments(frame, max_gap_seconds):
         timestamps = pd.DatetimeIndex(pd.to_datetime(segment["timestamp"]))
-        seconds = timestamps.asi8.astype(float) / 1_000_000_000
+        seconds = (timestamps - timestamps[0]).total_seconds().to_numpy(dtype=float)
         values = pd.to_numeric(segment[value_column], errors="coerce").to_numpy(float)
         run_start = 0
         for position, value in enumerate(values):

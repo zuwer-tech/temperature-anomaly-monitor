@@ -119,13 +119,12 @@ def test_fahrenheit_and_kelvin_are_rejected_without_conversion(unit):
     assert report["unsupported_temperature_units"] == [unit]
 
 
-@pytest.mark.parametrize("accuracy", [-0.1, "unknown"])
+@pytest.mark.parametrize("accuracy", [-0.1, np.inf, "unknown"])
 def test_invalid_sensor_accuracy_is_rejected(accuracy):
     df = _base_frame().assign(sensor_accuracy=[0.5, accuracy])
 
     with pytest.raises(ValueError, match="sensor_accuracy"):
         validate_input_data(df)
-
 
 
 def test_metadata_is_reported_but_does_not_become_an_ml_decision():

@@ -179,6 +179,7 @@ def preprocess_data(df):
     )
     valid_rate_interval = (
         (df["time_diff_seconds"] > 0)
+        & (df["time_diff_seconds"] <= RULE_PARAMS["continuity_gap_seconds"])
         & df["temperature"].notna()
         & previous_temperature.notna()
     )

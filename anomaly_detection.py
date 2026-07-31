@@ -60,6 +60,7 @@ RETRAIN_COMMANDS = "python preprocessing.py\npython train_model.py"
 
 
 
+
 def _record_triggered_rule(df, mask, rule_id):
     """Добавляет идентификатор правила, не стирая уже найденные причины."""
     for index in df.index[mask.fillna(False)]:

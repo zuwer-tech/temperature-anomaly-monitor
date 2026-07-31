@@ -7,14 +7,7 @@ from input_contract import (
     validate_measurement_metadata,
 )
 from rule_config import RULE_PARAMS
-
-
-# Параметры предобработки (вынесены из тела функции — единая точка настройки).
-# Подобраны так, чтобы работать и на синтетике (несколько датчиков), и на реальных
-# одноканальных трендовых данных (Т2.csv). См. tests/ и issue по объединению mod_AI_2.
-ROLLING_WINDOW = 10        # окно скользящих признаков, точек
-STUCK_MIN_RUN = 10        # сколько подряд одинаковых значений считать зависанием
-STUCK_ABS_TOL = 1e-6       # точное равенство для зависания (ступени квантования не ловим)
+from time_windows import causal_stuck_flags, causal_time_rolling
 
 
 def validate_input_data(df):
@@ -84,7 +77,7 @@ def validate_input_data(df):
     validate_measurement_metadata(df)
 
 
-def preprocess_data(df, rolling_window=ROLLING_WINDOW):
+def preprocess_data(df):
     """
     Предобработка температурных данных.
 
@@ -146,17 +139,22 @@ def preprocess_data(df, rolling_window=ROLLING_WINDOW):
     # Полностью пустой канал остаётся NaN: отсутствие измерения не является 0 °C.
     # Частичные пропуски по-прежнему заполняются только значениями того же датчика.
 
-    # Скользящие признаки
-    window_size = rolling_window
-
-    df["rolling_mean"] = (
-        df.groupby("sensor_id")["temperature_filled"]
-        .transform(lambda x: x.rolling(window=window_size, min_periods=1).mean())
+    # Скользящие признаки в физическом причинном окне [t-duration, t].
+    # Большой разрыв начинает новое окно: мы не считаем неизвестный участок
+    # между пробами частью непрерывного процесса.
+    df["rolling_mean"] = causal_time_rolling(
+        df,
+        "temperature_filled",
+        RULE_PARAMS["rolling_duration_seconds"],
+        "mean",
+        RULE_PARAMS["continuity_gap_seconds"],
     )
-
-    df["rolling_std"] = (
-        df.groupby("sensor_id")["temperature_filled"]
-        .transform(lambda x: x.rolling(window=window_size, min_periods=1).std())
+    df["rolling_std"] = causal_time_rolling(
+        df,
+        "temperature_filled",
+        RULE_PARAMS["rolling_duration_seconds"],
+        "std",
+        RULE_PARAMS["continuity_gap_seconds"],
     )
 
     # 0/std на ранних точках (окно не накопилось) -> маленькая константа, чтобы
@@ -199,36 +197,26 @@ def preprocess_data(df, rolling_window=ROLLING_WINDOW):
     df["z_score"] = df["z_score"].replace([np.inf, -np.inf], 0).fillna(0)
     df["abs_z_score"] = df["z_score"].abs()
 
-    # Признак зависания датчика: точное равенство подряд STUCK_MIN_RUN значений.
-    # Пороговый критерий (|Δt|<0.05 за окно 15) ловил ступени квантования АЦП
-    # реальных данных как зависание — тысячи ложных тревог. Точное равенство
-    # срабатывает только на по-настоящему застывшем сигнале.
-    is_stuck = np.zeros(len(df), dtype=int)
-    for _sid, idx in df.groupby("sensor_id").groups.items():
-        vals = df.loc[idx, "temperature_filled"].to_numpy()
-        run = 0
-        prev = None
-        for j, i in enumerate(idx):
-            v = vals[j]
-            if (
-                prev is not None
-                and not (np.isnan(v) or np.isnan(prev))
-                and abs(v - prev) < STUCK_ABS_TOL
-            ):
-                run += 1
-            else:
-                run = 0
-            if run >= STUCK_MIN_RUN:
-                is_stuck[i] = 1
-            prev = v
-    df["is_stuck"] = is_stuck
+    # Зависание измеряется реальным временем непрерывного равенства сигнала.
+    # Разрыв длиннее continuity_gap_seconds сбрасывает серию: по отсутствующим
+    # пробам нельзя заключать, что датчик всё это время был неподвижен.
+    df["is_stuck"] = causal_stuck_flags(
+        df,
+        "temperature_filled",
+        RULE_PARAMS["stuck_duration_seconds"],
+        RULE_PARAMS["continuity_gap_seconds"],
+        RULE_PARAMS["stuck_abs_tolerance"],
+    )
 
-    # Совместимость со старыми выходами: small_change/stuck_score сохранены
-    # (используются в отчётах), но is_stuck теперь считается точным равенством.
+    # Диагностический stuck_score сохранён, но теперь это доля малых изменений
+    # в физическом окне (0..1), а не зависимый от частоты опроса счётчик строк.
     df["small_change"] = (df["abs_temp_diff"] < 0.05).astype(int)
-    df["stuck_score"] = (
-        df.groupby("sensor_id")["small_change"]
-        .transform(lambda x: x.rolling(window=15, min_periods=1).sum())
+    df["stuck_score"] = causal_time_rolling(
+        df,
+        "small_change",
+        RULE_PARAMS["stuck_score_duration_seconds"],
+        "mean",
+        RULE_PARAMS["continuity_gap_seconds"],
     )
 
     # Отклонение от группы. Для одного датчика кросс-сенсорное среднее равно самому

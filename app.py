@@ -166,6 +166,24 @@ if data_quality_report["duplicate_measurement_count"]:
         + data_quality_report["duplicate_measurement_action"]
         + "."
     )
+st.caption("Политика времени: " + data_quality_report["timestamp_policy"])
+measurement_metadata = []
+if data_quality_report["temperature_units"]:
+    measurement_metadata.append(
+        "единицы: " + ", ".join(data_quality_report["temperature_units"])
+    )
+else:
+    measurement_metadata.append("единицы не указаны (контракт файла: °C)")
+if data_quality_report["sensor_accuracy_declared_count"]:
+    measurement_metadata.append(
+        "точность заявлена для "
+        f'{data_quality_report["sensor_accuracy_declared_count"]} строк'
+    )
+if data_quality_report["quality_flags"]:
+    measurement_metadata.append(
+        "флаги качества: " + ", ".join(data_quality_report["quality_flags"])
+    )
+st.caption("Метаданные измерений: " + "; ".join(measurement_metadata) + ".")
 if data_quality_report["status"] == "good":
     st.success("Явных ограничений качества входных данных не найдено.")
 else:

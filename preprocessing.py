@@ -2,6 +2,10 @@ import pandas as pd
 import numpy as np
 
 from data_quality import apply_duplicate_measurement_policy
+from input_contract import (
+    inspect_timestamp_values,
+    validate_measurement_metadata,
+)
 from rule_config import RULE_PARAMS
 
 
@@ -43,12 +47,17 @@ def validate_input_data(df):
     if df.empty:
         raise ValueError("Input DataFrame must contain at least one row.")
 
-    parsed_timestamps = pd.to_datetime(df["timestamp"], errors="coerce", format="mixed")
-    invalid_timestamp_count = int(parsed_timestamps.isna().sum())
-    if invalid_timestamp_count:
+    timestamp_inspection = inspect_timestamp_values(df["timestamp"])
+    if timestamp_inspection.invalid_count:
         raise ValueError(
             "timestamp contains "
-            f"{invalid_timestamp_count} invalid or missing value(s)."
+            f"{timestamp_inspection.invalid_count} invalid or missing value(s)."
+        )
+    if timestamp_inspection.mode == "mixed":
+        raise ValueError(
+            "timestamp mixes timezone-aware and timezone-naive values. "
+            "Use one local timezone for every unzoned value or include a "
+            "timezone/UTC offset in every value."
         )
 
     sensor_ids = df["sensor_id"]
@@ -71,6 +80,8 @@ def validate_input_data(df):
             "temperature contains "
             f"{invalid_temperature_count} invalid non-numeric value(s)."
         )
+
+    validate_measurement_metadata(df)
 
 
 def preprocess_data(df, rolling_window=ROLLING_WINDOW):
@@ -107,8 +118,7 @@ def preprocess_data(df, rolling_window=ROLLING_WINDOW):
     if "scenario" not in df.columns:
         df["scenario"] = "user_data"
 
-    # Переводим timestamp в формат даты и времени
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    # Время уже нормализовано политикой дублей: aware -> UTC, naive остаётся naive.
 
     # Температуру принудительно переводим в число
     df["temperature"] = pd.to_numeric(df["temperature"], errors="coerce")

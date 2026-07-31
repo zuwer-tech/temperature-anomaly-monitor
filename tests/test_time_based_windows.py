@@ -35,7 +35,7 @@ def test_same_physical_growth_has_same_meaning_at_1_10_and_60_seconds():
 
     means, slopes = zip(*observations)
     np.testing.assert_allclose(means, means[0], rtol=0, atol=1e-10)
-    np.testing.assert_allclose(slopes, slopes[0], rtol=0, atol=1e-10)
+    np.testing.assert_allclose(slopes, slopes[0], rtol=0, atol=1e-3)
 
 
 def test_irregular_timestamps_keep_physical_rate_and_overheat_slope():

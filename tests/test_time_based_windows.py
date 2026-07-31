@@ -151,7 +151,7 @@ def test_one_minute_windows_match_legacy_feature_values():
         window=20, min_periods=1
     ).mean()
     np.testing.assert_allclose(
-        with_ml_feature["rolling_temp_rate_mean"],
+        with_ml_feature["rolling_temp_diff_mean_20"],
         legacy_rate_mean,
     )
 

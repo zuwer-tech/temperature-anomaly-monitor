@@ -2,6 +2,12 @@
 
 import pandas as pd
 
+from input_contract import (
+    inspect_measurement_metadata,
+    inspect_timestamp_values,
+    timestamp_policy_description,
+)
+
 
 REQUIRED_COLUMNS = ("timestamp", "sensor_id", "temperature")
 DUPLICATE_MEASUREMENT_POLICY = "drop_exact_error_on_conflict"
@@ -14,9 +20,9 @@ DUPLICATE_MEASUREMENT_ACTION = (
 def _normalized_duplicate_frame(df, valid_keys=None):
     """Return a copy with normalized fields used by the duplicate key."""
     normalized = df.copy(deep=True)
-    normalized["timestamp"] = pd.to_datetime(
-        normalized["timestamp"], errors="coerce", format="mixed"
-    )
+    normalized["timestamp"] = inspect_timestamp_values(
+        normalized["timestamp"]
+    ).normalized
     normalized["sensor_id"] = (
         normalized["sensor_id"].astype("string").str.strip()
     )
@@ -47,9 +53,9 @@ def _duplicate_summary(df, valid_keys):
 def apply_duplicate_measurement_policy(df):
     """Drop exact repeats and reject ambiguous measurements.
 
-    The input is copied. ``sensor_id`` is stripped and ``timestamp`` is parsed
-    before the duplicate key is evaluated. The function is intended to run
-    after ordinary input validation and before time/rolling features.
+    The input is copied. sensor_id is stripped and timestamp is normalized
+    according to the shared time policy before the duplicate key is evaluated.
+    Run this after ordinary input validation and before feature calculations.
     """
     normalized = _normalized_duplicate_frame(df)
     without_exact = normalized.drop_duplicates(keep="first")
@@ -72,7 +78,7 @@ def apply_duplicate_measurement_policy(df):
 
 
 def build_data_quality_report(df):
-    """Return quality metrics and warnings for the dashboard."""
+    """Return quality metrics, time policy and metadata for the dashboard."""
     if not isinstance(df, pd.DataFrame):
         raise TypeError("Input data must be a pandas DataFrame.")
     missing = [name for name in REQUIRED_COLUMNS if name not in df.columns]
@@ -80,14 +86,17 @@ def build_data_quality_report(df):
         raise ValueError("Missing required columns: " + ", ".join(missing))
 
     rows = len(df)
-    timestamps = pd.to_datetime(df["timestamp"], errors="coerce", format="mixed")
+    time_inspection = inspect_timestamp_values(df["timestamp"])
+    timestamps = time_inspection.normalized
+    metadata = inspect_measurement_metadata(df)
     ids = df["sensor_id"]
     keys = ids.astype("string").str.strip()
     valid_ids = ids.notna() & keys.ne("")
     temperatures = df["temperature"]
     numeric = pd.to_numeric(temperatures, errors="coerce")
 
-    invalid_times = int(timestamps.isna().sum())
+    invalid_times = time_inspection.invalid_count
+    mixed_timezones = time_inspection.mode == "mixed"
     missing_ids = int((~valid_ids).sum())
     non_numeric = int((temperatures.notna() & numeric.isna()).sum())
     missing_temperatures = int(temperatures.isna().sum())
@@ -101,10 +110,13 @@ def build_data_quality_report(df):
     duplicates, exact_duplicates, conflicting_keys = _duplicate_summary(
         df, valid_keys
     )
-    out_of_order = int(
-        measurements.groupby("sensor_id", sort=False)["timestamp"]
-        .diff().lt(pd.Timedelta(0)).sum()
-    )
+    if mixed_timezones:
+        out_of_order = 0
+    else:
+        out_of_order = int(
+            measurements.groupby("sensor_id", sort=False)["timestamp"]
+            .diff().lt(pd.Timedelta(0)).sum()
+        )
     channels = pd.DataFrame({
         "sensor_id": keys[valid_ids],
         "temperature": numeric[valid_ids],
@@ -119,6 +131,11 @@ def build_data_quality_report(df):
         warnings.append("Файл не содержит строк измерений.")
     if invalid_times:
         warnings.append(f"Некорректных или пустых меток времени: {invalid_times}.")
+    if mixed_timezones:
+        warnings.append(
+            "Смешаны метки времени с часовым поясом и без него; "
+            "анализ остановлен."
+        )
     if missing_ids:
         warnings.append(f"Строк без идентификатора датчика: {missing_ids}.")
     if non_numeric:
@@ -144,13 +161,32 @@ def build_data_quality_report(df):
             f"Переходов назад по времени: {out_of_order}; "
             "перед анализом строки были отсортированы."
         )
+    if metadata["unsupported_temperature_units"]:
+        warnings.append(
+            "Неподдерживаемые единицы температуры: "
+            + ", ".join(metadata["unsupported_temperature_units"])
+            + "; автоматический перевод не выполняется."
+        )
+    if metadata["invalid_sensor_accuracy_count"]:
+        warnings.append(
+            "Некорректных значений sensor_accuracy: "
+            f'{metadata["invalid_sensor_accuracy_count"]}.'
+        )
+    if metadata["sensor_accuracy_declared_count"]:
+        warnings.append(
+            "sensor_accuracy — заявленная характеристика источника; "
+            "она не подтверждает калибровку или достоверность измерений."
+        )
 
     blocking = (
         rows == 0
         or invalid_times > 0
+        or mixed_timezones
         or missing_ids > 0
         or non_numeric > 0
         or conflicting_keys > 0
+        or bool(metadata["unsupported_temperature_units"])
+        or metadata["invalid_sensor_accuracy_count"] > 0
     )
     return {
         "status": "error" if blocking else ("warning" if warnings else "good"),
@@ -166,7 +202,12 @@ def build_data_quality_report(df):
         "out_of_order_count": out_of_order,
         "fully_missing_sensor_count": empty_sensors,
         "invalid_timestamp_count": invalid_times,
+        "timestamp_mode": time_inspection.mode,
+        "timestamp_source_timezones": list(time_inspection.source_timezones),
+        "timestamp_normalized_timezone": time_inspection.normalized_timezone,
+        "timestamp_policy": timestamp_policy_description(time_inspection),
         "missing_sensor_id_count": missing_ids,
         "non_numeric_temperature_count": non_numeric,
+        **metadata,
         "warnings": warnings,
     }

@@ -231,7 +231,7 @@ def preprocess_data(df):
             df["group_peer_count"],
         ) = causal_group_mean(
             df,
-            "temperature_filled",
+            "temperature",
             RULE_PARAMS["group_alignment_tolerance_seconds"],
         )
         df["diff_from_group_mean"] = (

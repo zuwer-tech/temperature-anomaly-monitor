@@ -61,8 +61,8 @@ def causal_group_mean(frame, value_column, tolerance_seconds):
                 for peer_sensor, value in available.items()
                 if peer_sensor != sensor_id
             ]
-            peer_count.loc[index] = len(peers)
             if np.isfinite(own_value):
+                peer_count.loc[index] = len(peers)
                 group_mean.loc[index] = float(np.mean([own_value, *peers]))
 
     return group_mean, peer_count

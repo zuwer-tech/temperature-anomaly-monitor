@@ -7,6 +7,7 @@ from input_contract import (
     validate_measurement_metadata,
 )
 from rule_config import RULE_PARAMS
+from sensor_alignment import causal_group_mean
 from time_windows import causal_stuck_flags, causal_time_rolling
 
 
@@ -99,6 +100,7 @@ def preprocess_data(df):
     - abs_z_score
     - is_stuck
     - abs_diff_from_group_mean
+    - group_peer_count
     - preliminary_warning
     """
 
@@ -219,13 +221,18 @@ def preprocess_data(df):
         RULE_PARAMS["continuity_gap_seconds"],
     )
 
-    # Отклонение от группы. Для одного датчика кросс-сенсорное среднее равно самому
-    # значению (отклонение 0, правило мёртвое). Поэтому при одном датчике берём
-    # отклонение от собственного rolling_mean (подход mod_AI_2) — оно осмысленно.
+    # Отклонение от группы. Для каждой точки берём только одновременные или
+    # последние прошлые измерения соседних датчиков в пределах явного допуска.
+    # Будущие точки не используются. group_peer_count показывает, сколько
+    # именно соседних датчиков подтвердили групповое среднее.
     if df["sensor_id"].nunique() > 1:
-        df["mean_temp_all_sensors"] = (
-            df.groupby("timestamp")["temperature_filled"]
-            .transform("mean")
+        (
+            df["mean_temp_all_sensors"],
+            df["group_peer_count"],
+        ) = causal_group_mean(
+            df,
+            "temperature",
+            RULE_PARAMS["group_alignment_tolerance_seconds"],
         )
         df["diff_from_group_mean"] = (
             df["temperature_filled"] - df["mean_temp_all_sensors"]
@@ -233,6 +240,7 @@ def preprocess_data(df):
     else:
         df["mean_temp_all_sensors"] = df["rolling_mean"]
         df["diff_from_group_mean"] = df["temperature_filled"] - df["rolling_mean"]
+        df["group_peer_count"] = 0
 
     df["abs_diff_from_group_mean"] = df["diff_from_group_mean"].abs()
 

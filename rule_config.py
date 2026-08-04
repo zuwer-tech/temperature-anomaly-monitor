@@ -8,6 +8,7 @@ RULE_PARAMS = {
     "sharp_jump_rate_c_per_min": 5.0,       # |ΔT/Δt|, °C/мин
     "z_score": 3.0,                        # локальное отклонение, σ
     "group_deviation": 8.0,                # отклонение от группы, °C
+    "group_alignment_tolerance_seconds": 5.0,  # причинное выравнивание
     "rolling_duration_seconds": 9 * 60.0,  # прежние 10 точек при шаге 1 мин
     "stuck_duration_seconds": 10 * 60.0,   # непрерывное равенство сигнала
     "stuck_score_duration_seconds": 14 * 60.0,  # прежние 15 точек

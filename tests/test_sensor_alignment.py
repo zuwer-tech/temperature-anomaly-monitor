@@ -160,5 +160,6 @@ def test_single_sensor_keeps_rolling_mean_fallback():
     )
     np.testing.assert_array_equal(prepared["group_peer_count"], [0, 0, 0])
 
+
 def test_diagnostic_peer_count_is_not_added_to_ml_schema():
     assert "group_peer_count" not in FEATURE_COLUMNS

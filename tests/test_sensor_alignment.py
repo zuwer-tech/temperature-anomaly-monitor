@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from pandas.testing import assert_frame_equal, assert_series_equal
 
+from model_schema import FEATURE_COLUMNS
 from preprocessing import preprocess_data
 from sensor_alignment import causal_group_mean
 
@@ -158,3 +159,6 @@ def test_single_sensor_keeps_rolling_mean_fallback():
         check_names=False,
     )
     np.testing.assert_array_equal(prepared["group_peer_count"], [0, 0, 0])
+
+def test_diagnostic_peer_count_is_not_added_to_ml_schema():
+    assert "group_peer_count" not in FEATURE_COLUMNS

@@ -77,21 +77,36 @@ def test_measurement_outside_tolerance_does_not_participate():
 
 
 def test_missing_sensor_does_not_create_artificial_group_value():
-    frame = pd.DataFrame(
+    raw = pd.DataFrame(
         {
-            "timestamp": pd.to_datetime(
-                ["2026-01-01 00:00:00", "2026-01-01 00:00:01"]
-            ),
-            "sensor_id": ["T-01", "T-02"],
-            "value": [10.0, np.nan],
+            "timestamp": [
+                "2026-01-01 00:00:00",
+                "2026-01-01 00:00:00",
+                "2026-01-01 00:00:01",
+                "2026-01-01 00:00:01",
+            ],
+            "sensor_id": ["T-01", "T-02", "T-01", "T-02"],
+            "temperature": [10.0, np.nan, 11.0, 20.0],
         }
     )
 
-    group_mean, peer_count = causal_group_mean(frame, "value", 5)
+    prepared = preprocess_data(raw)
+    early_measured = prepared[
+        (prepared["sensor_id"] == "T-01")
+        & (prepared["timestamp"] == pd.Timestamp("2026-01-01 00:00:00"))
+    ].iloc[0]
+    early_missing = prepared[
+        (prepared["sensor_id"] == "T-02")
+        & (prepared["timestamp"] == pd.Timestamp("2026-01-01 00:00:00"))
+    ].iloc[0]
 
-    assert group_mean.iloc[0] == 10.0
-    assert np.isnan(group_mean.iloc[1])
-    assert peer_count.iloc[1] == 0
+    # bfill используется для некоторых временных признаков, но групповое правило
+    # не должно принять будущие 20 °C за реально измеренную раннюю пробу.
+    assert early_missing["temperature_filled"] == 20.0
+    assert np.isnan(early_missing["mean_temp_all_sensors"])
+    assert early_missing["group_peer_count"] == 0
+    assert early_measured["mean_temp_all_sensors"] == 10.0
+    assert early_measured["group_peer_count"] == 0
 
 
 def test_input_row_order_does_not_change_alignment():

@@ -91,7 +91,7 @@ def test_missing_sensor_does_not_create_artificial_group_value():
 
     assert group_mean.iloc[0] == 10.0
     assert np.isnan(group_mean.iloc[1])
-    assert peer_count.iloc[1] == 1
+    assert peer_count.iloc[1] == 0
 
 
 def test_input_row_order_does_not_change_alignment():

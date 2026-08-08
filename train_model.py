@@ -71,6 +71,7 @@ def parse_split_boundary(value, name):
         )
     return pd.Timestamp(parsed)
 
+
 def prepare_features(df):
     """Готовит тот же безопасный ML-вход, что и detect_anomalies."""
     prepared, X, _ml_eligible = prepare_ml_features(df)
@@ -186,6 +187,7 @@ def split_train_validation_test(
         X_test,
         info,
     )
+
 
 def train(
     df,
@@ -323,6 +325,7 @@ def evaluate(
         ),
         "final_report_dataset": "test",
     }
+
 
 def save_model(scaler, model, info, model_dir=MODEL_DIR, contamination=DEFAULT_CONTAMINATION):
     os.makedirs(model_dir, exist_ok=True)

@@ -220,6 +220,102 @@ def test_current_benchmark_split_is_complete_and_disjoint(
     assert train_keys.isdisjoint(evaluation_keys)
 
 
+def test_custom_time_split_changes_sizes_predictably(
+    preprocessed_full_synth,
+):
+    custom_start = "2026-06-06 13:00:00"
+    train_df, evaluation_df, _x_train, _x_evaluation, info = (
+        train_model.split_train_evaluation(
+            preprocessed_full_synth,
+            test_start=custom_start,
+        )
+    )
+
+    assert info["test_start"] == "2026-06-06T13:00:00"
+    assert info["train_rows"] == 360
+    assert info["evaluation_rows"] == 2520
+    assert len(train_df) == 360
+    assert len(evaluation_df) == 2520
+    assert (train_df["timestamp"] < pd.Timestamp(custom_start)).all()
+    assert (evaluation_df["timestamp"] >= pd.Timestamp(custom_start)).all()
+
+
+@pytest.mark.parametrize(
+    "test_start",
+    [
+        "not-a-date",
+        "2026-06-06",
+        "2026-06-06T14:00:00",
+        None,
+    ],
+)
+def test_invalid_time_split_boundary_is_rejected(
+    preprocessed_full_synth,
+    test_start,
+):
+    with pytest.raises(
+        ValueError,
+        match="test_start.*YYYY-MM-DD HH:MM:SS",
+    ):
+        train_model.split_train_evaluation(
+            preprocessed_full_synth,
+            test_start=test_start,
+        )
+
+
+def test_time_split_requires_rows_on_both_sides(
+    preprocessed_full_synth,
+):
+    timestamps = pd.to_datetime(preprocessed_full_synth["timestamp"])
+    earliest = timestamps.min().strftime(train_model.TEST_START_FORMAT)
+    after_latest = (
+        timestamps.max() + pd.Timedelta(seconds=1)
+    ).strftime(train_model.TEST_START_FORMAT)
+
+    with pytest.raises(ValueError, match="В train нет строк"):
+        train_model.split_train_evaluation(
+            preprocessed_full_synth,
+            test_start=earliest,
+        )
+    with pytest.raises(ValueError, match="В evaluation нет строк"):
+        train_model.split_train_evaluation(
+            preprocessed_full_synth,
+            test_start=after_latest,
+        )
+
+
+def test_metadata_saves_actual_time_split(
+    preprocessed_full_synth,
+    tmp_path,
+):
+    custom_start = "2026-06-06 13:00:00"
+    scaler, model, info = train_model.train(
+        preprocessed_full_synth,
+        test_start=custom_start,
+    )
+    train_model.save_model(
+        scaler,
+        model,
+        info,
+        model_dir=str(tmp_path),
+    )
+
+    metadata = json.loads(
+        (tmp_path / "model_meta.json").read_text(encoding="utf-8")
+    )
+    assert metadata["test_start"] == "2026-06-06T13:00:00"
+    assert metadata["train_rows"] == 360
+    assert metadata["evaluation_rows"] == 2520
+
+
+def test_train_cli_accepts_time_split():
+    args = train_model.parse_args(
+        ["--test-start", "2026-06-06 13:00:00"]
+    )
+
+    assert args.test_start == "2026-06-06 13:00:00"
+
+
 def test_time_split_is_deterministic(preprocessed_full_synth):
     first = train_model.split_train_evaluation(preprocessed_full_synth)
     second = train_model.split_train_evaluation(preprocessed_full_synth)

@@ -50,10 +50,14 @@ REQUIRED_METADATA_FIELDS = (
     "train_rows",
     "trained_on_normal",
     "split_strategy",
+    "validation_start",
+    "validation_rows",
+    "validation_normal_rows",
+    "validation_anomaly_rows",
     "test_start",
-    "evaluation_rows",
-    "evaluation_normal_rows",
-    "evaluation_anomaly_rows",
+    "test_rows",
+    "test_normal_rows",
+    "test_anomaly_rows",
     "score_calibration",
 )
 RETRAIN_COMMANDS = "python preprocessing.py\npython train_model.py"

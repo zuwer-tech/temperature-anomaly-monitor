@@ -87,6 +87,14 @@ def test_manifest_schema_requires_provenance_split_and_safety_fields():
         "access_classification",
     }.issubset(experiment_required)
 
+    labeling = schema["$defs"]["expert_labeling"]
+    assert {"coverage", "unlabeled_policy"}.issubset(labeling["required"])
+    assert labeling["properties"]["coverage"]["enum"] == [
+        "full_timeline",
+        "event_only",
+        "partial",
+    ]
+
 
 def test_manifest_template_is_explicitly_non_real_and_split_by_experiment():
     manifest = json.loads(MANIFEST_TEMPLATE.read_text(encoding="utf-8"))
@@ -96,7 +104,12 @@ def test_manifest_template_is_explicitly_non_real_and_split_by_experiment():
     experiment_required = set(schema["$defs"]["experiment"]["required"])
     for experiment in manifest["experiments"]:
         assert experiment_required.issubset(experiment)
-    assert manifest["template_only"] is True
+        labeling = experiment["expert_labeling"]
+        assert labeling["coverage"] == "partial"
+        assert (
+            labeling["unlabeled_policy"]
+            == "unknown_exclude_from_metrics"
+        )    assert manifest["template_only"] is True
     assert manifest["publication_permission"] == "no_publication"
     assert manifest["split_policy"] == {
         "method": "by_experiment",

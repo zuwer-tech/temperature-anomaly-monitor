@@ -246,6 +246,7 @@ def test_custom_time_split_changes_sizes_predictably(
         "not-a-date",
         "2026-06-06",
         "2026-06-06T14:00:00",
+        "2026-6-6 14:00:00",
         None,
     ],
 )

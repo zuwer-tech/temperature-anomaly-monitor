@@ -637,9 +637,15 @@ def test_score_normalization_is_independent_of_current_batch():
 
 def test_train_calibration_uses_only_training_baseline(preprocessed_synth):
     scaler, model, info = train_model.train(preprocessed_synth)
-    _train_df, _evaluation_df, X_train, _X_evaluation, _ = (
-        train_model.split_train_evaluation(preprocessed_synth)
-    )
+    (
+        _train_df,
+        _validation_df,
+        _test_df,
+        X_train,
+        _X_validation,
+        _X_test,
+        _info,
+    ) = train_model.split_train_validation_test(preprocessed_synth)
     train_scores = -model.decision_function(scaler.transform(X_train))
     calibration = info["score_calibration"]
 
@@ -819,39 +825,57 @@ def test_inference_does_not_modify_model_artifacts(preprocessed_synth, tmp_path)
     assert hashes_after == hashes_before
 
 
-def test_model_quality_floor(preprocessed_full_synth):
-    """Независимые precision >= 0.66 и F1 >= 0.45 на полном benchmark."""
+def test_model_quality_floor_is_not_weakened_on_final_test(
+    preprocessed_full_synth,
+):
+    """На закрытом test сохраняются precision >= 0.66 и F1 >= 0.45."""
     scaler, model, _ = train_model.train(preprocessed_full_synth)
     report = train_model.evaluate(preprocessed_full_synth, scaler, model)
-    assert report["precision"] >= 0.66, report
-    assert report["f1"] >= 0.45, report
+    final_test = report["test"]
+    assert final_test["precision"] >= 0.66, report
+    assert final_test["f1"] >= 0.45, report
 
 
-def test_evaluate_uses_only_evaluation_rows(preprocessed_synth):
+def test_evaluate_reports_validation_and_uses_test_as_final(
+    preprocessed_synth,
+):
     scaler, model, _ = train_model.train(preprocessed_synth)
-    _train_df, evaluation_df, _X_train, X_evaluation, info = (
-        train_model.split_train_evaluation(preprocessed_synth)
-    )
+    (
+        _train_df,
+        validation_df,
+        test_df,
+        _x_train,
+        X_validation,
+        X_test,
+        split_info,
+    ) = train_model.split_train_validation_test(preprocessed_synth)
     report = train_model.evaluate(preprocessed_synth, scaler, model)
 
-    expected_pred = pd.Series(0, index=evaluation_df.index, dtype=int)
-    expected_pred.loc[X_evaluation.index] = (
-        model.predict(scaler.transform(X_evaluation)) == -1
-    ).astype(int)
-    expected_gt = (evaluation_df["scenario"] != "normal").astype(int)
-    assert report["iforest_anomalies"] == int(expected_pred.sum())
-    assert report["tp"] == int(((expected_pred == 1) & (expected_gt == 1)).sum())
-    assert report["fp"] == int(((expected_pred == 1) & (expected_gt == 0)).sum())
-    assert report["fn"] == int(((expected_pred == 0) & (expected_gt == 1)).sum())
-    for key in (
-        "train_rows",
-        "evaluation_rows",
-        "evaluation_normal_rows",
-        "evaluation_anomaly_rows",
-        "split_strategy",
-        "test_start",
+    for name, frame, features in (
+        ("validation", validation_df, X_validation),
+        ("test", test_df, X_test),
     ):
-        assert report[key] == info[key]
+        expected_pred = pd.Series(0, index=frame.index, dtype=int)
+        expected_pred.loc[features.index] = (
+            model.predict(scaler.transform(features)) == -1
+        ).astype(int)
+        expected_gt = (frame["scenario"] != "normal").astype(int)
+        partition_report = report[name]
+        assert partition_report["iforest_anomalies"] == int(
+            expected_pred.sum()
+        )
+        assert partition_report["tp"] == int(
+            ((expected_pred == 1) & (expected_gt == 1)).sum()
+        )
+        assert partition_report["fp"] == int(
+            ((expected_pred == 1) & (expected_gt == 0)).sum()
+        )
+        assert partition_report["fn"] == int(
+            ((expected_pred == 0) & (expected_gt == 1)).sum()
+        )
+
+    assert report["split"] == split_info
+    assert report["final_report_dataset"] == "test"
 
 
 def test_meta_json_written(preprocessed_synth, tmp_path):
@@ -873,10 +897,14 @@ def test_meta_json_written(preprocessed_synth, tmp_path):
         "train_rows",
         "trained_on_normal",
         "split_strategy",
+        "validation_start",
+        "validation_rows",
+        "validation_normal_rows",
+        "validation_anomaly_rows",
         "test_start",
-        "evaluation_rows",
-        "evaluation_normal_rows",
-        "evaluation_anomaly_rows",
+        "test_rows",
+        "test_normal_rows",
+        "test_anomaly_rows",
         "score_calibration",
     }
     assert expected_fields.issubset(meta)

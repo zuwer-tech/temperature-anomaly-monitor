@@ -109,7 +109,9 @@ def test_manifest_template_is_explicitly_non_real_and_split_by_experiment():
         assert (
             labeling["unlabeled_policy"]
             == "unknown_exclude_from_metrics"
-        )    assert manifest["template_only"] is True
+        )
+
+    assert manifest["template_only"] is True
     assert manifest["publication_permission"] == "no_publication"
     assert manifest["split_policy"] == {
         "method": "by_experiment",

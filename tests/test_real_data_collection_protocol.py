@@ -31,6 +31,7 @@ EXPECTED_EVENT_COLUMNS = [
 
 def test_protocol_states_current_evidence_gap_and_no_fake_data():
     text = PROTOCOL.read_text(encoding="utf-8")
+    normalized_text = " ".join(text.replace("**", "").split())
 
     required_phrases = [
         "не являются реальным набором данных",
@@ -43,7 +44,7 @@ def test_protocol_states_current_evidence_gap_and_no_fake_data():
         "нельзя добавлять в GitHub",
     ]
     for phrase in required_phrases:
-        assert phrase in text
+        assert phrase in normalized_text
 
 
 def test_manifest_schema_requires_provenance_split_and_safety_fields():

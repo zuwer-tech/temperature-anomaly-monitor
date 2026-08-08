@@ -1,0 +1,157 @@
+{
+  "manifest_version": "1.0",
+  "template_only": true,
+  "dataset_id": "REPLACE_WITH_DATASET_ID",
+  "dataset_version": "0.0-template",
+  "created_at": "1970-01-01T00:00:00Z",
+  "description": "TEMPLATE ONLY — no real measurements or expert labels included.",
+  "owner_role": "REPLACE_WITH_OWNER_ROLE",
+  "license": "REPLACE_WITH_LICENSE_OR_INTERNAL_TERMS",
+  "publication_permission": "no_publication",
+  "split_policy": {
+    "method": "by_experiment",
+    "final_test_untouched": true,
+    "frozen_at": "1970-01-01T00:00:00Z",
+    "rationale": "REPLACE_WITH_SPLIT_RATIONALE_BEFORE_MODEL_EVALUATION"
+  },
+  "experiments": [
+    {
+      "experiment_id": "REPLACE_TRAIN_EXPERIMENT_ID",
+      "split": "train",
+      "source_name": "REPLACE_WITH_SOURCE",
+      "installation": "REPLACE_WITH_ANONYMIZED_INSTALLATION",
+      "equipment_or_process": "REPLACE_WITH_PROCESS_DESCRIPTION",
+      "measurement_file": "REPLACE_WITH_PRIVATE_PATH/train.csv",
+      "measurement_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "events_file": "REPLACE_WITH_PRIVATE_PATH/events.csv",
+      "source_schema": "REPLACE_WITH_COLUMN_DESCRIPTION",
+      "adapter": "REPLACE_WITH_ADAPTER_NAME_OR_CANONICAL_CSV",
+      "sensor_ids": ["REPLACE_SENSOR_ID"],
+      "source_temperature_unit": "REPLACE_WITH_UNIT",
+      "canonical_temperature_unit": "°C",
+      "sampling": {
+        "mode": "regular",
+        "expected_interval_seconds": 1,
+        "description": "REPLACE_WITH_SAMPLING_DESCRIPTION"
+      },
+      "time": {
+        "start": "1970-01-01T00:00:00Z",
+        "end": "1970-01-01T00:01:00Z",
+        "timezone": "UTC"
+      },
+      "normal_operation": "REPLACE_WITH_CONFIRMED_NORMAL_DESCRIPTION",
+      "controlled_event_summary": "",
+      "expert_labeling": {
+        "labeler_role": "REPLACE_WITH_EXPERT_ROLE",
+        "labeling_date": "1970-01-01",
+        "review_status": "not_reviewed",
+        "guidance": "REPLACE_WITH_LABELING_GUIDANCE_VERSION",
+        "coverage": "partial",
+        "unlabeled_policy": "unknown_exclude_from_metrics"
+      },
+      "data_quality": {
+        "missing_data_notes": "",
+        "maintenance_notes": "",
+        "regime_change_notes": ""
+      },
+      "provenance": {
+        "origin": "REPLACE_WITH_ORIGIN",
+        "collection_purpose": "REPLACE_WITH_PURPOSE",
+        "source_contact_role": "REPLACE_WITH_CONTACT_ROLE"
+      },
+      "access_classification": "restricted"
+    },
+    {
+      "experiment_id": "REPLACE_VALIDATION_EXPERIMENT_ID",
+      "split": "validation",
+      "source_name": "REPLACE_WITH_SOURCE",
+      "installation": "REPLACE_WITH_ANONYMIZED_INSTALLATION",
+      "equipment_or_process": "REPLACE_WITH_PROCESS_DESCRIPTION",
+      "measurement_file": "REPLACE_WITH_PRIVATE_PATH/validation.csv",
+      "measurement_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "events_file": "REPLACE_WITH_PRIVATE_PATH/events.csv",
+      "source_schema": "REPLACE_WITH_COLUMN_DESCRIPTION",
+      "adapter": "REPLACE_WITH_ADAPTER_NAME_OR_CANONICAL_CSV",
+      "sensor_ids": ["REPLACE_SENSOR_ID"],
+      "source_temperature_unit": "REPLACE_WITH_UNIT",
+      "canonical_temperature_unit": "°C",
+      "sampling": {
+        "mode": "regular",
+        "expected_interval_seconds": 1,
+        "description": "REPLACE_WITH_SAMPLING_DESCRIPTION"
+      },
+      "time": {
+        "start": "1970-01-02T00:00:00Z",
+        "end": "1970-01-02T00:01:00Z",
+        "timezone": "UTC"
+      },
+      "normal_operation": "REPLACE_WITH_NORMAL_DESCRIPTION",
+      "controlled_event_summary": "REPLACE_WITH_CONTROLLED_EVENTS",
+      "expert_labeling": {
+        "labeler_role": "REPLACE_WITH_EXPERT_ROLE",
+        "labeling_date": "1970-01-01",
+        "review_status": "not_reviewed",
+        "guidance": "REPLACE_WITH_LABELING_GUIDANCE_VERSION",
+        "coverage": "partial",
+        "unlabeled_policy": "unknown_exclude_from_metrics"
+      },
+      "data_quality": {
+        "missing_data_notes": "",
+        "maintenance_notes": "",
+        "regime_change_notes": ""
+      },
+      "provenance": {
+        "origin": "REPLACE_WITH_ORIGIN",
+        "collection_purpose": "REPLACE_WITH_PURPOSE",
+        "source_contact_role": "REPLACE_WITH_CONTACT_ROLE"
+      },
+      "access_classification": "restricted"
+    },
+    {
+      "experiment_id": "REPLACE_TEST_EXPERIMENT_ID",
+      "split": "test",
+      "source_name": "REPLACE_WITH_SOURCE",
+      "installation": "REPLACE_WITH_ANONYMIZED_INSTALLATION",
+      "equipment_or_process": "REPLACE_WITH_PROCESS_DESCRIPTION",
+      "measurement_file": "REPLACE_WITH_PRIVATE_PATH/test.csv",
+      "measurement_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "events_file": "REPLACE_WITH_PRIVATE_PATH/events.csv",
+      "source_schema": "REPLACE_WITH_COLUMN_DESCRIPTION",
+      "adapter": "REPLACE_WITH_ADAPTER_NAME_OR_CANONICAL_CSV",
+      "sensor_ids": ["REPLACE_SENSOR_ID"],
+      "source_temperature_unit": "REPLACE_WITH_UNIT",
+      "canonical_temperature_unit": "°C",
+      "sampling": {
+        "mode": "regular",
+        "expected_interval_seconds": 1,
+        "description": "REPLACE_WITH_SAMPLING_DESCRIPTION"
+      },
+      "time": {
+        "start": "1970-01-03T00:00:00Z",
+        "end": "1970-01-03T00:01:00Z",
+        "timezone": "UTC"
+      },
+      "normal_operation": "REPLACE_WITH_NORMAL_DESCRIPTION",
+      "controlled_event_summary": "REPLACE_WITH_CONTROLLED_EVENTS",
+      "expert_labeling": {
+        "labeler_role": "REPLACE_WITH_EXPERT_ROLE",
+        "labeling_date": "1970-01-01",
+        "review_status": "not_reviewed",
+        "guidance": "REPLACE_WITH_LABELING_GUIDANCE_VERSION",
+        "coverage": "partial",
+        "unlabeled_policy": "unknown_exclude_from_metrics"
+      },
+      "data_quality": {
+        "missing_data_notes": "",
+        "maintenance_notes": "",
+        "regime_change_notes": ""
+      },
+      "provenance": {
+        "origin": "REPLACE_WITH_ORIGIN",
+        "collection_purpose": "REPLACE_WITH_PURPOSE",
+        "source_contact_role": "REPLACE_WITH_CONTACT_ROLE"
+      },
+      "access_classification": "restricted"
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+experiment_id,event_id,sensor_id,event_type,start_time_earliest,start_time_latest,end_time_earliest,end_time_latest,label_status,confidence,expert_comment,evidence_reference

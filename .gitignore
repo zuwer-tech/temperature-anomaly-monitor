@@ -225,3 +225,6 @@ models/*.json
 
 # Generated canonical real data (data_adapters.py)
 real_temperature_data.csv
+
+# Unpublished real experiment datasets (see docs/DATA_COLLECTION_PROTOCOL.md)
+real_dataset/

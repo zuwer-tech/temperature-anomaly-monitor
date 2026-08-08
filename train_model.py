@@ -63,6 +63,11 @@ def parse_test_start(test_start):
             "Некорректная граница test_start. Ожидается формат "
             f"YYYY-MM-DD HH:MM:SS, получено: {test_start!r}."
         ) from exc
+    if parsed.strftime(TEST_START_FORMAT) != test_start:
+        raise ValueError(
+            "Некорректная граница test_start. Ожидается точный формат "
+            f"YYYY-MM-DD HH:MM:SS, получено: {test_start!r}."
+        )
     return pd.Timestamp(parsed)
 
 

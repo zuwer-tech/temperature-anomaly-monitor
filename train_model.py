@@ -45,7 +45,7 @@ DEFAULT_CONTAMINATION = 0.04
 RANDOM_STATE = 42
 N_ESTIMATORS = 200
 VALIDATION_START = "2026-06-06 14:00:00"
-TEST_START = "2026-06-06 17:00:00"
+TEST_START = "2026-06-06 16:00:00"
 SPLIT_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 SPLIT_STRATEGY = "time_train_validation_test"
 
@@ -415,7 +415,7 @@ def parse_args(argv=None):
         default=TEST_START,
         help=(
             "Начало закрытого test в формате YYYY-MM-DD HH:MM:SS. "
-            "По умолчанию 2026-06-06 17:00:00."
+            "По умолчанию 2026-06-06 16:00:00."
         ),
     )
     return parser.parse_args(argv)

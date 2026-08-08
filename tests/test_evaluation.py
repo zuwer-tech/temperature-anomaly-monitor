@@ -105,7 +105,7 @@ def test_detection_delay_uses_event_start_and_marks_missed_events():
     ]
 
 
-def test_unified_report_matches_each_pipeline_layer(
+def test_unified_report_separates_validation_and_final_test(
     preprocessed_synth,
     tmp_path,
 ):
@@ -120,35 +120,43 @@ def test_unified_report_matches_each_pipeline_layer(
         preprocessed_synth,
         model_dir=str(tmp_path),
     )
-    _train, evaluation, _x_train, _x_evaluation, split_info = (
-        train_model.split_train_evaluation(detected)
-    )
-    truth = (evaluation["scenario"] != "normal").astype(int)
+    (
+        _train,
+        validation,
+        test,
+        _x_train,
+        _x_validation,
+        _x_test,
+        split_info,
+    ) = train_model.split_train_validation_test(detected)
 
     assert report["positive_class"] == "scenario != normal"
     assert report["split"] == split_info
-    assert set(report["layers"]) == set(LAYER_COLUMNS)
+    assert report["validation"]["purpose"] == "model_selection_only"
+    assert report["test"]["purpose"] == "final_evaluation_only"
+    assert report["final_report"]["dataset"] == "test"
+    assert report["final_report"]["layers"] == report["test"]["layers"]
 
-    for layer, column in LAYER_COLUMNS.items():
-        expected_metrics = binary_classification_metrics(
-            truth,
-            evaluation[column].astype(int),
-        )
-        expected_delay = detection_delay_metrics(evaluation, column)
-        assert report["layers"][layer] == {
-            **expected_metrics,
-            "detection_delay": expected_delay,
-        }
-        assert sum(
-            report["layers"][layer]["confusion_matrix"].values()
-        ) == split_info["evaluation_rows"]
-        assert (
-            expected_delay["events_detected"]
-            + expected_delay["events_missed"]
-            == expected_delay["events_total"]
-        )
-
-    assert split_info["evaluation_rows"] < len(preprocessed_synth)
+    for name, partition in (
+        ("validation", validation),
+        ("test", test),
+    ):
+        layers = report[name]["layers"]
+        assert set(layers) == set(LAYER_COLUMNS)
+        truth = (partition["scenario"] != "normal").astype(int)
+        for layer, column in LAYER_COLUMNS.items():
+            expected_metrics = binary_classification_metrics(
+                truth,
+                partition[column].astype(int),
+            )
+            expected_delay = detection_delay_metrics(partition, column)
+            assert layers[layer] == {
+                **expected_metrics,
+                "detection_delay": expected_delay,
+            }
+            assert sum(
+                layers[layer]["confusion_matrix"].values()
+            ) == len(partition)
 
 
 def test_report_is_reproducible_without_training_or_artifact_changes(
@@ -191,14 +199,16 @@ def test_report_requires_reference_scenario(preprocessed_synth, tmp_path):
         )
 
 
-def test_report_uses_configured_time_split(
+def test_report_uses_configured_three_way_split(
     preprocessed_full_synth,
     tmp_path,
 ):
-    custom_start = "2026-06-06 13:00:00"
+    validation_start = "2026-06-06 13:00:00"
+    test_start = "2026-06-06 15:00:00"
     scaler, model, info = train_model.train(
         preprocessed_full_synth,
-        test_start=custom_start,
+        validation_start=validation_start,
+        test_start=test_start,
     )
     train_model.save_model(
         scaler,
@@ -210,17 +220,31 @@ def test_report_uses_configured_time_split(
     report = evaluate_detection_layers(
         preprocessed_full_synth,
         model_dir=str(tmp_path),
-        test_start=custom_start,
+        validation_start=validation_start,
+        test_start=test_start,
     )
 
-    assert report["split"]["test_start"] == "2026-06-06T13:00:00"
+    assert report["split"]["validation_start"] == (
+        "2026-06-06T13:00:00"
+    )
+    assert report["split"]["test_start"] == "2026-06-06T15:00:00"
     assert report["split"]["train_rows"] == 360
-    assert report["split"]["evaluation_rows"] == 2520
+    assert report["split"]["validation_rows"] == 720
+    assert report["split"]["test_rows"] == 1800
+    assert sum(
+        report["final_report"]["layers"]["combined"][
+            "confusion_matrix"
+        ].values()
+    ) == 1800
 
 
-def test_evaluation_cli_accepts_time_split():
-    args = evaluation.parse_args(
-        ["--test-start", "2026-06-06 13:00:00"]
-    )
+def test_evaluation_cli_accepts_both_split_boundaries():
+    args = evaluation.parse_args([
+        "--validation-start",
+        "2026-06-06 13:00:00",
+        "--test-start",
+        "2026-06-06 15:00:00",
+    ])
 
-    assert args.test_start == "2026-06-06 13:00:00"
+    assert args.validation_start == "2026-06-06 13:00:00"
+    assert args.test_start == "2026-06-06 15:00:00"

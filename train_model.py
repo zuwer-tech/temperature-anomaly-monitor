@@ -44,32 +44,32 @@ DEFAULT_INPUT = "preprocessed_temperature_data.csv"
 DEFAULT_CONTAMINATION = 0.04
 RANDOM_STATE = 42
 N_ESTIMATORS = 200
-TEST_START = "2026-06-06 14:00:00"
-TEST_START_FORMAT = "%Y-%m-%d %H:%M:%S"
-SPLIT_STRATEGY = "time"
+VALIDATION_START = "2026-06-06 14:00:00"
+TEST_START = "2026-06-06 17:00:00"
+SPLIT_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+SPLIT_STRATEGY = "time_train_validation_test"
 
 
-def parse_test_start(test_start):
-    """Проверяет явную границу и возвращает её как pandas Timestamp."""
-    if not isinstance(test_start, str):
+def parse_split_boundary(value, name):
+    """Проверяет явную временную границу и возвращает pandas Timestamp."""
+    if not isinstance(value, str):
         raise ValueError(
-            "Граница test_start должна быть строкой в формате "
+            f"Граница {name} должна быть строкой в формате "
             "YYYY-MM-DD HH:MM:SS."
         )
     try:
-        parsed = datetime.strptime(test_start, TEST_START_FORMAT)
+        parsed = datetime.strptime(value, SPLIT_TIME_FORMAT)
     except ValueError as exc:
         raise ValueError(
-            "Некорректная граница test_start. Ожидается формат "
-            f"YYYY-MM-DD HH:MM:SS, получено: {test_start!r}."
+            f"Некорректная граница {name}. Ожидается формат "
+            f"YYYY-MM-DD HH:MM:SS, получено: {value!r}."
         ) from exc
-    if parsed.strftime(TEST_START_FORMAT) != test_start:
+    if parsed.strftime(SPLIT_TIME_FORMAT) != value:
         raise ValueError(
-            "Некорректная граница test_start. Ожидается точный формат "
-            f"YYYY-MM-DD HH:MM:SS, получено: {test_start!r}."
+            f"Некорректная граница {name}. Ожидается точный формат "
+            f"YYYY-MM-DD HH:MM:SS, получено: {value!r}."
         )
     return pd.Timestamp(parsed)
-
 
 def prepare_features(df):
     """Готовит тот же безопасный ML-вход, что и detect_anomalies."""
@@ -94,73 +94,104 @@ def _normal_mask(df):
     return mask, True
 
 
-def split_train_evaluation(df, test_start=TEST_START):
-    """Готовит признаки и делит данные на ранний train и поздний evaluation.
+def _partition_counts(frame, prefix):
+    """Возвращает размеры normal/anomaly для одной временной части."""
+    normal_rows = int((frame["scenario"] == "normal").sum())
+    return {
+        f"{prefix}_rows": int(len(frame)),
+        f"{prefix}_normal_rows": normal_rows,
+        f"{prefix}_anomaly_rows": int(len(frame) - normal_rows),
+    }
 
-    Признаки рассчитываются до применения масок, поэтому первые строки
-    evaluation используют доступную прошлую rolling-историю train. В train
-    попадают только normal-строки до явно заданной временной границы.
 
-    Возвращает ``(train_df, evaluation_df, X_train, X_evaluation, info)``.
+def split_train_validation_test(
+    df,
+    validation_start=VALIDATION_START,
+    test_start=TEST_START,
+):
+    """Причинно готовит признаки и делит ряд на train, validation и test.
+
+    Признаки рассчитываются на полном прошлом ряду до временных масок. Train
+    содержит только подтверждённые normal-строки. Validation предназначен для
+    выбора параметров, а самый поздний test — только для финального отчёта.
+
+    Возвращает train/validation/test DataFrame, три матрицы признаков и info.
     """
     prepared_df, X = prepare_features(df)
-    boundary = parse_test_start(test_start)
+    validation_boundary = parse_split_boundary(
+        validation_start,
+        "validation_start",
+    )
+    test_boundary = parse_split_boundary(test_start, "test_start")
+    if validation_boundary >= test_boundary:
+        raise ValueError(
+            "Граница validation_start должна быть раньше test_start."
+        )
+
     normal_mask, used_normal = _normal_mask(prepared_df)
     ml_eligible = prepared_df.index.isin(X.index)
     train_mask = (
-        (prepared_df["timestamp"] < boundary)
+        (prepared_df["timestamp"] < validation_boundary)
         & normal_mask
         & ml_eligible
     )
-    evaluation_mask = prepared_df["timestamp"] >= boundary
+    validation_mask = (
+        (prepared_df["timestamp"] >= validation_boundary)
+        & (prepared_df["timestamp"] < test_boundary)
+    )
+    test_mask = prepared_df["timestamp"] >= test_boundary
 
     if not train_mask.any():
         raise ValueError(
-            "В train нет строк до временной границы "
-            f"{boundary.isoformat()}."
+            "В train нет подтверждённых normal-строк до границы "
+            f"{validation_boundary.isoformat()}."
         )
-    if not evaluation_mask.any():
+    if not validation_mask.any():
         raise ValueError(
-            "В evaluation нет строк начиная с временной границы "
-            f"{boundary.isoformat()}."
+            "В validation нет строк между границами "
+            f"{validation_boundary.isoformat()} и {test_boundary.isoformat()}."
+        )
+    if not test_mask.any():
+        raise ValueError(
+            "В test нет строк начиная с границы "
+            f"{test_boundary.isoformat()}."
         )
 
     train_df = prepared_df.loc[train_mask].copy()
-    evaluation_df = prepared_df.loc[evaluation_mask].copy()
+    validation_df = prepared_df.loc[validation_mask].copy()
+    test_df = prepared_df.loc[test_mask].copy()
     X_train = X.loc[train_df.index].copy()
-    evaluation_ml_index = X.index.intersection(
-        evaluation_df.index,
-        sort=False,
-    )
-    X_evaluation = X.loc[evaluation_ml_index].copy()
-
-    if "scenario" in evaluation_df.columns:
-        evaluation_normal_rows = int(
-            (evaluation_df["scenario"] == "normal").sum()
-        )
-        evaluation_anomaly_rows = int(
-            (evaluation_df["scenario"] != "normal").sum()
-        )
-    else:
-        evaluation_normal_rows = 0
-        evaluation_anomaly_rows = 0
+    X_validation = X.loc[
+        X.index.intersection(validation_df.index, sort=False)
+    ].copy()
+    X_test = X.loc[
+        X.index.intersection(test_df.index, sort=False)
+    ].copy()
 
     info = {
         "train_rows": int(len(train_df)),
         "trained_on_normal": used_normal,
         "split_strategy": SPLIT_STRATEGY,
-        "test_start": boundary.isoformat(),
-        "evaluation_rows": int(len(evaluation_df)),
-        "evaluation_normal_rows": evaluation_normal_rows,
-        "evaluation_anomaly_rows": evaluation_anomaly_rows,
+        "validation_start": validation_boundary.isoformat(),
+        **_partition_counts(validation_df, "validation"),
+        "test_start": test_boundary.isoformat(),
+        **_partition_counts(test_df, "test"),
     }
-    return train_df, evaluation_df, X_train, X_evaluation, info
-
+    return (
+        train_df,
+        validation_df,
+        test_df,
+        X_train,
+        X_validation,
+        X_test,
+        info,
+    )
 
 def train(
     df,
     contamination=DEFAULT_CONTAMINATION,
     random_state=RANDOM_STATE,
+    validation_start=VALIDATION_START,
     test_start=TEST_START,
 ):
     """Обучает scaler+IsolationForest на раннем штатном режиме.
@@ -168,8 +199,18 @@ def train(
     Возвращает (scaler, model, info) где info — словарь с числом train-строк и
     сведениями о временном разбиении.
     """
-    _train_df, _evaluation_df, X_train, _X_evaluation, info = (
-        split_train_evaluation(df, test_start=test_start)
+    (
+        _train_df,
+        _validation_df,
+        _test_df,
+        X_train,
+        _X_validation,
+        _X_test,
+        info,
+    ) = split_train_validation_test(
+        df,
+        validation_start=validation_start,
+        test_start=test_start,
     )
 
     scaler = StandardScaler().fit(X_train)
@@ -198,45 +239,44 @@ def train(
     return scaler, model, info
 
 
-def evaluate(df, scaler, model, test_start=TEST_START):
-    """Считает метрики только на более поздней evaluation-части."""
-    _train_df, evaluation_df, _X_train, X_evaluation, split_info = (
-        split_train_evaluation(df, test_start=test_start)
-    )
-    pred = pd.Series(0, index=evaluation_df.index, dtype=int)
-    if not X_evaluation.empty:
-        pred.loc[X_evaluation.index] = (
-            model.predict(scaler.transform(X_evaluation)) == -1
+def _iforest_partition_report(frame, features, scaler, model):
+    """Считает Isolation Forest метрики для одной неизменяемой части."""
+    pred = pd.Series(0, index=frame.index, dtype=int)
+    if not features.empty:
+        pred.loc[features.index] = (
+            model.predict(scaler.transform(features)) == -1
         ).astype(int)
+
     report = {
+        "rows": int(len(frame)),
+        "normal_rows": int((frame["scenario"] == "normal").sum()),
+        "anomaly_rows": int((frame["scenario"] != "normal").sum()),
         "iforest_anomalies": int(pred.sum()),
-        "train_rows": split_info["train_rows"],
-        "evaluation_rows": split_info["evaluation_rows"],
-        "evaluation_normal_rows": split_info["evaluation_normal_rows"],
-        "evaluation_anomaly_rows": split_info["evaluation_anomaly_rows"],
-        "split_strategy": split_info["split_strategy"],
-        "test_start": split_info["test_start"],
     }
-    if "scenario" not in evaluation_df.columns:
-        return report
-    gt = (evaluation_df["scenario"] != "normal").astype(int)
+    gt = (frame["scenario"] != "normal").astype(int)
     tp = int(((pred == 1) & (gt == 1)).sum())
     fp = int(((pred == 1) & (gt == 0)).sum())
     fn = int(((pred == 0) & (gt == 1)).sum())
     precision = tp / (tp + fp) if (tp + fp) else 0.0
     recall = tp / (tp + fn) if (tp + fn) else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if precision + recall
+        else 0.0
+    )
     report.update({
-        "tp": tp, "fp": fp, "fn": fn,
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
         "precision": round(precision, 4),
         "recall": round(recall, 4),
         "f1": round(f1, 4),
     })
     per_scenario = {}
-    for scenario, sub in evaluation_df.groupby("scenario"):
-        sp = pred.loc[sub.index]
+    for scenario, sub in frame.groupby("scenario"):
+        scenario_pred = pred.loc[sub.index]
         total = int(len(sub))
-        detected = int(sp.sum())
+        detected = int(scenario_pred.sum())
         per_scenario[scenario] = {
             "total": total,
             "detected": detected,
@@ -245,6 +285,44 @@ def evaluate(df, scaler, model, test_start=TEST_START):
     report["per_scenario"] = per_scenario
     return report
 
+
+def evaluate(
+    df,
+    scaler,
+    model,
+    validation_start=VALIDATION_START,
+    test_start=TEST_START,
+):
+    """Считает рабочие validation и финальные test метрики отдельно."""
+    (
+        _train_df,
+        validation_df,
+        test_df,
+        _X_train,
+        X_validation,
+        X_test,
+        split_info,
+    ) = split_train_validation_test(
+        df,
+        validation_start=validation_start,
+        test_start=test_start,
+    )
+    return {
+        "split": split_info,
+        "validation": _iforest_partition_report(
+            validation_df,
+            X_validation,
+            scaler,
+            model,
+        ),
+        "test": _iforest_partition_report(
+            test_df,
+            X_test,
+            scaler,
+            model,
+        ),
+        "final_report_dataset": "test",
+    }
 
 def save_model(scaler, model, info, model_dir=MODEL_DIR, contamination=DEFAULT_CONTAMINATION):
     os.makedirs(model_dir, exist_ok=True)
@@ -259,10 +337,14 @@ def save_model(scaler, model, info, model_dir=MODEL_DIR, contamination=DEFAULT_C
         "train_rows": info["train_rows"],
         "trained_on_normal": info["trained_on_normal"],
         "split_strategy": info["split_strategy"],
+        "validation_start": info["validation_start"],
+        "validation_rows": info["validation_rows"],
+        "validation_normal_rows": info["validation_normal_rows"],
+        "validation_anomaly_rows": info["validation_anomaly_rows"],
         "test_start": info["test_start"],
-        "evaluation_rows": info["evaluation_rows"],
-        "evaluation_normal_rows": info["evaluation_normal_rows"],
-        "evaluation_anomaly_rows": info["evaluation_anomaly_rows"],
+        "test_rows": info["test_rows"],
+        "test_normal_rows": info["test_normal_rows"],
+        "test_anomaly_rows": info["test_anomaly_rows"],
         "score_calibration": info["score_calibration"],
     }
     with open(os.path.join(model_dir, "model_meta.json"), "w", encoding="utf-8") as fh:
@@ -272,23 +354,35 @@ def save_model(scaler, model, info, model_dir=MODEL_DIR, contamination=DEFAULT_C
 def main(
     input_file=DEFAULT_INPUT,
     contamination=DEFAULT_CONTAMINATION,
+    validation_start=VALIDATION_START,
     test_start=TEST_START,
 ):
     df = pd.read_csv(input_file)
     scaler, model, info = train(
         df,
         contamination=contamination,
+        validation_start=validation_start,
         test_start=test_start,
     )
     save_model(scaler, model, info, contamination=contamination)
-    report = evaluate(df, scaler, model, test_start=test_start)
+    report = evaluate(
+        df,
+        scaler,
+        model,
+        validation_start=validation_start,
+        test_start=test_start,
+    )
     print("Модель обучена.")
     for key in (
         "train_rows",
-        "evaluation_rows",
-        "evaluation_normal_rows",
-        "evaluation_anomaly_rows",
+        "validation_rows",
+        "validation_normal_rows",
+        "validation_anomaly_rows",
+        "test_rows",
+        "test_normal_rows",
+        "test_anomaly_rows",
         "split_strategy",
+        "validation_start",
         "test_start",
         "trained_on_normal",
     ):
@@ -309,11 +403,19 @@ def parse_args(argv=None):
         default=DEFAULT_CONTAMINATION,
     )
     parser.add_argument(
+        "--validation-start",
+        default=VALIDATION_START,
+        help=(
+            "Начало validation в формате YYYY-MM-DD HH:MM:SS. "
+            "По умолчанию 2026-06-06 14:00:00."
+        ),
+    )
+    parser.add_argument(
         "--test-start",
         default=TEST_START,
         help=(
-            "Начало evaluation в формате YYYY-MM-DD HH:MM:SS. "
-            "По умолчанию используется граница встроенного benchmark."
+            "Начало закрытого test в формате YYYY-MM-DD HH:MM:SS. "
+            "По умолчанию 2026-06-06 17:00:00."
         ),
     )
     return parser.parse_args(argv)
@@ -324,5 +426,6 @@ if __name__ == "__main__":
     main(
         input_file=args.input,
         contamination=args.contamination,
+        validation_start=args.validation_start,
         test_start=args.test_start,
     )

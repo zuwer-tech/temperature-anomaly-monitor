@@ -114,6 +114,19 @@ timestamp,sensor_id,temperature,temperature_unit,sensor_accuracy,quality_flag
 ответ алгоритма. Ground truth нельзя менять после просмотра предсказаний ради
 улучшения метрик.
 
+Отсутствие метки **не означает normal**. В manifest эксперт указывает:
+
+- `coverage = full_timeline` — проверена вся временная шкала;
+- `coverage = event_only` — размечены только известные события;
+- `coverage = partial` — просмотрена только часть опыта;
+- `unlabeled_policy = unknown_exclude_from_metrics` — необозначенные интервалы
+  имеют неизвестный класс и исключаются из основной оценки;
+- `unlabeled_policy = confirmed_normal_outside_events` допустим только при
+  `full_timeline` и явном подтверждении эксперта.
+
+`uncertain` и `disputed` не превращаются автоматически ни в anomaly, ни в
+normal. Их показывают отдельно или используют в анализе чувствительности.
+Основные метрики считают на подтверждённых метках.
 ## 4. Train, validation и test
 
 Разделение выполняется **по experiment_id**:

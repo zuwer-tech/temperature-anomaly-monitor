@@ -45,7 +45,9 @@
         "labeler_role": "REPLACE_WITH_EXPERT_ROLE",
         "labeling_date": "1970-01-01",
         "review_status": "not_reviewed",
-        "guidance": "REPLACE_WITH_LABELING_GUIDANCE_VERSION"
+        "guidance": "REPLACE_WITH_LABELING_GUIDANCE_VERSION",
+        "coverage": "partial",
+        "unlabeled_policy": "unknown_exclude_from_metrics"
       },
       "data_quality": {
         "missing_data_notes": "",
@@ -89,7 +91,9 @@
         "labeler_role": "REPLACE_WITH_EXPERT_ROLE",
         "labeling_date": "1970-01-01",
         "review_status": "not_reviewed",
-        "guidance": "REPLACE_WITH_LABELING_GUIDANCE_VERSION"
+        "guidance": "REPLACE_WITH_LABELING_GUIDANCE_VERSION",
+        "coverage": "partial",
+        "unlabeled_policy": "unknown_exclude_from_metrics"
       },
       "data_quality": {
         "missing_data_notes": "",
@@ -133,7 +137,9 @@
         "labeler_role": "REPLACE_WITH_EXPERT_ROLE",
         "labeling_date": "1970-01-01",
         "review_status": "not_reviewed",
-        "guidance": "REPLACE_WITH_LABELING_GUIDANCE_VERSION"
+        "guidance": "REPLACE_WITH_LABELING_GUIDANCE_VERSION",
+        "coverage": "partial",
+        "unlabeled_policy": "unknown_exclude_from_metrics"
       },
       "data_quality": {
         "missing_data_notes": "",

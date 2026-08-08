@@ -182,20 +182,36 @@ def evaluate_detection_layers(df, model_dir=MODEL_DIR, test_start=TEST_START):
     }
 
 
-def main():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Отчёт качества правил, ML и объединённой системы."
     )
     parser.add_argument("--input", default=DEFAULT_INPUT)
     parser.add_argument("--model-dir", default=MODEL_DIR)
     parser.add_argument(
+        "--test-start",
+        default=TEST_START,
+        help=(
+            "Начало evaluation в формате YYYY-MM-DD HH:MM:SS. "
+            "Должно совпадать с границей обучения."
+        ),
+    )
+    parser.add_argument(
         "--output",
         help="Необязательный путь для сохранения JSON-отчёта.",
     )
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def main():
+    args = parse_args()
 
     df = pd.read_csv(args.input)
-    report = evaluate_detection_layers(df, model_dir=args.model_dir)
+    report = evaluate_detection_layers(
+        df,
+        model_dir=args.model_dir,
+        test_start=args.test_start,
+    )
     report_json = json.dumps(report, ensure_ascii=False, indent=2)
 
     if args.output:

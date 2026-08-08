@@ -19,8 +19,10 @@
     python preprocessing.py     # если ещё нет preprocessed_temperature_data.csv
     python train_model.py        # обучить и сохранить модель
 """
+import argparse
 import json
 import os
+from datetime import datetime
 
 from model_schema import (
     FEATURE_COLUMNS,
@@ -43,7 +45,30 @@ DEFAULT_CONTAMINATION = 0.04
 RANDOM_STATE = 42
 N_ESTIMATORS = 200
 TEST_START = "2026-06-06 14:00:00"
+TEST_START_FORMAT = "%Y-%m-%d %H:%M:%S"
 SPLIT_STRATEGY = "time"
+
+
+def parse_test_start(test_start):
+    """Проверяет явную границу и возвращает её как pandas Timestamp."""
+    if not isinstance(test_start, str):
+        raise ValueError(
+            "Граница test_start должна быть строкой в формате "
+            "YYYY-MM-DD HH:MM:SS."
+        )
+    try:
+        parsed = datetime.strptime(test_start, TEST_START_FORMAT)
+    except ValueError as exc:
+        raise ValueError(
+            "Некорректная граница test_start. Ожидается формат "
+            f"YYYY-MM-DD HH:MM:SS, получено: {test_start!r}."
+        ) from exc
+    if parsed.strftime(TEST_START_FORMAT) != test_start:
+        raise ValueError(
+            "Некорректная граница test_start. Ожидается точный формат "
+            f"YYYY-MM-DD HH:MM:SS, получено: {test_start!r}."
+        )
+    return pd.Timestamp(parsed)
 
 
 def prepare_features(df):
@@ -74,12 +99,12 @@ def split_train_evaluation(df, test_start=TEST_START):
 
     Признаки рассчитываются до применения масок, поэтому первые строки
     evaluation используют доступную прошлую rolling-историю train. В train
-    попадают только normal-строки до фиксированной временной границы.
+    попадают только normal-строки до явно заданной временной границы.
 
     Возвращает ``(train_df, evaluation_df, X_train, X_evaluation, info)``.
     """
     prepared_df, X = prepare_features(df)
-    boundary = pd.Timestamp(test_start)
+    boundary = parse_test_start(test_start)
     normal_mask, used_normal = _normal_mask(prepared_df)
     ml_eligible = prepared_df.index.isin(X.index)
     train_mask = (
@@ -132,14 +157,19 @@ def split_train_evaluation(df, test_start=TEST_START):
     return train_df, evaluation_df, X_train, X_evaluation, info
 
 
-def train(df, contamination=DEFAULT_CONTAMINATION, random_state=RANDOM_STATE):
+def train(
+    df,
+    contamination=DEFAULT_CONTAMINATION,
+    random_state=RANDOM_STATE,
+    test_start=TEST_START,
+):
     """Обучает scaler+IsolationForest на раннем штатном режиме.
 
     Возвращает (scaler, model, info) где info — словарь с числом train-строк и
     сведениями о временном разбиении.
     """
     _train_df, _evaluation_df, X_train, _X_evaluation, info = (
-        split_train_evaluation(df)
+        split_train_evaluation(df, test_start=test_start)
     )
 
     scaler = StandardScaler().fit(X_train)
@@ -168,10 +198,10 @@ def train(df, contamination=DEFAULT_CONTAMINATION, random_state=RANDOM_STATE):
     return scaler, model, info
 
 
-def evaluate(df, scaler, model):
+def evaluate(df, scaler, model, test_start=TEST_START):
     """Считает метрики только на более поздней evaluation-части."""
     _train_df, evaluation_df, _X_train, X_evaluation, split_info = (
-        split_train_evaluation(df)
+        split_train_evaluation(df, test_start=test_start)
     )
     pred = pd.Series(0, index=evaluation_df.index, dtype=int)
     if not X_evaluation.empty:
@@ -239,11 +269,19 @@ def save_model(scaler, model, info, model_dir=MODEL_DIR, contamination=DEFAULT_C
         json.dump(meta, fh, ensure_ascii=False, indent=2)
 
 
-def main(input_file=DEFAULT_INPUT, contamination=DEFAULT_CONTAMINATION):
+def main(
+    input_file=DEFAULT_INPUT,
+    contamination=DEFAULT_CONTAMINATION,
+    test_start=TEST_START,
+):
     df = pd.read_csv(input_file)
-    scaler, model, info = train(df, contamination=contamination)
+    scaler, model, info = train(
+        df,
+        contamination=contamination,
+        test_start=test_start,
+    )
     save_model(scaler, model, info, contamination=contamination)
-    report = evaluate(df, scaler, model)
+    report = evaluate(df, scaler, model, test_start=test_start)
     print("Модель обучена.")
     for key in (
         "train_rows",
@@ -260,5 +298,31 @@ def main(input_file=DEFAULT_INPUT, contamination=DEFAULT_CONTAMINATION):
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Обучение Isolation Forest на раннем normal-baseline."
+    )
+    parser.add_argument("--input", default=DEFAULT_INPUT)
+    parser.add_argument(
+        "--contamination",
+        type=float,
+        default=DEFAULT_CONTAMINATION,
+    )
+    parser.add_argument(
+        "--test-start",
+        default=TEST_START,
+        help=(
+            "Начало evaluation в формате YYYY-MM-DD HH:MM:SS. "
+            "По умолчанию используется граница встроенного benchmark."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(
+        input_file=args.input,
+        contamination=args.contamination,
+        test_start=args.test_start,
+    )

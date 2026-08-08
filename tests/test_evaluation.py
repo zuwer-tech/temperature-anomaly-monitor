@@ -12,6 +12,7 @@ from evaluation import (
     detection_delay_metrics,
     evaluate_detection_layers,
 )
+import evaluation
 import train_model
 
 
@@ -188,3 +189,38 @@ def test_report_requires_reference_scenario(preprocessed_synth, tmp_path):
             preprocessed_synth.drop(columns=["scenario"]),
             model_dir=str(tmp_path),
         )
+
+
+def test_report_uses_configured_time_split(
+    preprocessed_full_synth,
+    tmp_path,
+):
+    custom_start = "2026-06-06 13:00:00"
+    scaler, model, info = train_model.train(
+        preprocessed_full_synth,
+        test_start=custom_start,
+    )
+    train_model.save_model(
+        scaler,
+        model,
+        info,
+        model_dir=str(tmp_path),
+    )
+
+    report = evaluate_detection_layers(
+        preprocessed_full_synth,
+        model_dir=str(tmp_path),
+        test_start=custom_start,
+    )
+
+    assert report["split"]["test_start"] == "2026-06-06T13:00:00"
+    assert report["split"]["train_rows"] == 360
+    assert report["split"]["evaluation_rows"] == 2520
+
+
+def test_evaluation_cli_accepts_time_split():
+    args = evaluation.parse_args(
+        ["--test-start", "2026-06-06 13:00:00"]
+    )
+
+    assert args.test_start == "2026-06-06 13:00:00"

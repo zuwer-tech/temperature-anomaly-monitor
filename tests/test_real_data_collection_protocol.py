@@ -90,7 +90,12 @@ def test_manifest_schema_requires_provenance_split_and_safety_fields():
 
 def test_manifest_template_is_explicitly_non_real_and_split_by_experiment():
     manifest = json.loads(MANIFEST_TEMPLATE.read_text(encoding="utf-8"))
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
 
+    assert set(schema["required"]).issubset(manifest)
+    experiment_required = set(schema["$defs"]["experiment"]["required"])
+    for experiment in manifest["experiments"]:
+        assert experiment_required.issubset(experiment)
     assert manifest["template_only"] is True
     assert manifest["publication_permission"] == "no_publication"
     assert manifest["split_policy"] == {
@@ -133,3 +138,8 @@ def test_data_document_links_collection_protocol():
         in data_doc
     )
     assert "не считается\nнезависимо размеченным test-набором" in data_doc
+
+def test_private_real_dataset_directory_is_gitignored():
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+
+    assert "real_dataset/" in gitignore.splitlines()

@@ -21,16 +21,25 @@ def test_demo_training_creates_compatible_bundle_and_enables_inference(tmp_path)
     assert sorted(path.name for path in tmp_path.iterdir()) == sorted(MODEL_ARTIFACTS)
     assert result["artifacts"] == list(MODEL_ARTIFACTS)
     assert result["info"]["trained_on_normal"] is True
-    assert result["info"]["split_strategy"] == "time"
+    assert result["info"]["split_strategy"] == (
+        "time_train_validation_test"
+    )
     assert result["info"]["train_rows"] > 0
-    assert result["info"]["evaluation_rows"] > 0
+    assert result["info"]["validation_rows"] > 0
+    assert result["info"]["test_rows"] > 0
 
     metadata = json.loads(
         (tmp_path / "model_meta.json").read_text(encoding="utf-8")
     )
     assert metadata["trained_on_normal"] is True
-    assert metadata["split_strategy"] == "time"
-    assert metadata["test_start"] == result["info"]["test_start"]
+    assert metadata["split_strategy"] == "time_train_validation_test"
+    for key in (
+        "validation_start",
+        "validation_rows",
+        "test_start",
+        "test_rows",
+    ):
+        assert metadata[key] == result["info"][key]
 
     demo_df = preprocess_data(pd.read_csv(ROOT / "synthetic_temperature_data.csv"))
     results, _alarm_log = detect_anomalies(demo_df, model_dir=str(tmp_path))

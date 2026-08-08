@@ -1,8 +1,8 @@
 """Единый воспроизводимый отчёт качества правил, ML и их объединения.
 
 Скрипт не обучает модель: он загружает заранее сохранённые артефакты,
-выполняет обычный инференс и считает метрики только на поздней
-evaluation-части временного ряда.
+выполняет обычный инференс и отдельно считает рабочие validation-метрики и
+финальные test-метрики на более поздних временных частях.
 """
 import argparse
 import json
@@ -15,7 +15,8 @@ from train_model import (
     DEFAULT_INPUT,
     MODEL_DIR,
     TEST_START,
-    split_train_evaluation,
+    VALIDATION_START,
+    split_train_validation_test,
 )
 
 
@@ -150,35 +151,67 @@ def detection_delay_metrics(evaluation, prediction_column):
     }
 
 
-def evaluate_detection_layers(df, model_dir=MODEL_DIR, test_start=TEST_START):
-    """Считает единый отчёт на одной независимой evaluation-выборке."""
+def _evaluate_partition_layers(partition):
+    """Считает метрики трёх слоёв для одной временной части."""
+    truth = (partition["scenario"] != "normal").astype(int)
+    layers = {}
+    for layer, column in LAYER_COLUMNS.items():
+        layer_report = binary_classification_metrics(
+            truth,
+            partition[column].astype(int),
+        )
+        layer_report["detection_delay"] = detection_delay_metrics(
+            partition,
+            column,
+        )
+        layers[layer] = layer_report
+    return layers
+
+
+def evaluate_detection_layers(
+    df,
+    model_dir=MODEL_DIR,
+    validation_start=VALIDATION_START,
+    test_start=TEST_START,
+):
+    """Разделяет рабочую validation и финальную test оценку."""
     if "scenario" not in df.columns:
         raise ValueError(
             "Для оценки нужна колонка scenario с эталонной разметкой."
         )
 
     detected, _alarm_log = detect_anomalies(df, model_dir=model_dir)
-    _train, evaluation, _x_train, _x_evaluation, split_info = (
-        split_train_evaluation(detected, test_start=test_start)
+    (
+        _train,
+        validation,
+        test,
+        _x_train,
+        _x_validation,
+        _x_test,
+        split_info,
+    ) = split_train_validation_test(
+        detected,
+        validation_start=validation_start,
+        test_start=test_start,
     )
-
-    truth = (evaluation["scenario"] != "normal").astype(int)
-    layers = {}
-    for layer, column in LAYER_COLUMNS.items():
-        layer_report = binary_classification_metrics(
-            truth,
-            evaluation[column].astype(int),
-        )
-        layer_report["detection_delay"] = detection_delay_metrics(
-            evaluation,
-            column,
-        )
-        layers[layer] = layer_report
+    validation_layers = _evaluate_partition_layers(validation)
+    test_layers = _evaluate_partition_layers(test)
 
     return {
         "positive_class": "scenario != normal",
         "split": split_info,
-        "layers": layers,
+        "validation": {
+            "purpose": "model_selection_only",
+            "layers": validation_layers,
+        },
+        "test": {
+            "purpose": "final_evaluation_only",
+            "layers": test_layers,
+        },
+        "final_report": {
+            "dataset": "test",
+            "layers": test_layers,
+        },
     }
 
 
@@ -189,10 +222,18 @@ def parse_args(argv=None):
     parser.add_argument("--input", default=DEFAULT_INPUT)
     parser.add_argument("--model-dir", default=MODEL_DIR)
     parser.add_argument(
+        "--validation-start",
+        default=VALIDATION_START,
+        help=(
+            "Начало validation в формате YYYY-MM-DD HH:MM:SS. "
+            "Должно совпадать с границей обучения."
+        ),
+    )
+    parser.add_argument(
         "--test-start",
         default=TEST_START,
         help=(
-            "Начало evaluation в формате YYYY-MM-DD HH:MM:SS. "
+            "Начало закрытого test в формате YYYY-MM-DD HH:MM:SS. "
             "Должно совпадать с границей обучения."
         ),
     )
@@ -210,6 +251,7 @@ def main():
     report = evaluate_detection_layers(
         df,
         model_dir=args.model_dir,
+        validation_start=args.validation_start,
         test_start=args.test_start,
     )
     report_json = json.dumps(report, ensure_ascii=False, indent=2)

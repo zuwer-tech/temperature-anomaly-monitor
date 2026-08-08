@@ -88,11 +88,15 @@ def _valid_metadata():
         "n_estimators": 200,
         "train_rows": 10,
         "trained_on_normal": True,
-        "split_strategy": "time",
-        "test_start": "2026-01-01T00:00:00",
-        "evaluation_rows": 5,
-        "evaluation_normal_rows": 3,
-        "evaluation_anomaly_rows": 2,
+        "split_strategy": "time_train_validation_test",
+        "validation_start": "2026-01-01T00:00:00",
+        "validation_rows": 5,
+        "validation_normal_rows": 3,
+        "validation_anomaly_rows": 2,
+        "test_start": "2026-01-01T01:00:00",
+        "test_rows": 5,
+        "test_normal_rows": 3,
+        "test_anomaly_rows": 2,
         "score_calibration": {
             "method": model_schema.SCORE_CALIBRATION_METHOD,
             "score_min": -1.0,
@@ -179,121 +183,162 @@ def test_failed_main_creates_no_model_artifacts(
     assert not model_dir.exists() or list(model_dir.iterdir()) == []
 
 def test_train_uses_normal_only(preprocessed_synth):
-    """Модель должна обучаться на 720 ранних normal-строках."""
+    """Модель обучается только на ранних normal-строках."""
     _scaler, _model, info = train_model.train(preprocessed_synth)
     assert info["trained_on_normal"] is True
     assert info["train_rows"] == 720
 
-    train_df, _evaluation_df, _X_train, _X_evaluation, _ = (
-        train_model.split_train_evaluation(preprocessed_synth)
+    train_df, _validation_df, _test_df, *_rest = (
+        train_model.split_train_validation_test(preprocessed_synth)
     )
     assert (train_df["scenario"] == "normal").all()
-    assert (train_df["timestamp"] < pd.Timestamp(train_model.TEST_START)).all()
+    assert (
+        train_df["timestamp"]
+        < pd.Timestamp(train_model.VALIDATION_START)
+    ).all()
 
 
-def test_current_benchmark_split_is_complete_and_disjoint(
+def test_current_benchmark_three_way_split_is_complete_and_disjoint(
     preprocessed_full_synth,
 ):
-    train_df, evaluation_df, _X_train, _X_evaluation, info = (
-        train_model.split_train_evaluation(preprocessed_full_synth)
-    )
+    (
+        train_df,
+        validation_df,
+        test_df,
+        _x_train,
+        _x_validation,
+        _x_test,
+        info,
+    ) = train_model.split_train_validation_test(preprocessed_full_synth)
 
     assert info == {
         "train_rows": 720,
         "trained_on_normal": True,
-        "split_strategy": "time",
-        "test_start": "2026-06-06T14:00:00",
-        "evaluation_rows": 2160,
-        "evaluation_normal_rows": 1580,
-        "evaluation_anomaly_rows": 580,
+        "split_strategy": "time_train_validation_test",
+        "validation_start": "2026-06-06T14:00:00",
+        "validation_rows": 720,
+        "validation_normal_rows": 650,
+        "validation_anomaly_rows": 70,
+        "test_start": "2026-06-06T16:00:00",
+        "test_rows": 1440,
+        "test_normal_rows": 930,
+        "test_anomaly_rows": 510,
     }
     assert (train_df["scenario"] == "normal").all()
-    assert evaluation_df["sensor_id"].nunique() == 6
-    assert set(evaluation_df.loc[
-        evaluation_df["scenario"] != "normal", "scenario"
-    ]) == ANOMALY_SCENARIOS
+    assert validation_df["sensor_id"].nunique() == 6
+    assert test_df["sensor_id"].nunique() == 6
 
-    train_keys = set(zip(train_df["sensor_id"], train_df["timestamp"]))
-    evaluation_keys = set(zip(
-        evaluation_df["sensor_id"], evaluation_df["timestamp"]
-    ))
-    assert train_keys.isdisjoint(evaluation_keys)
+    validation_scenarios = set(validation_df.loc[
+        validation_df["scenario"] != "normal",
+        "scenario",
+    ])
+    test_scenarios = set(test_df.loc[
+        test_df["scenario"] != "normal",
+        "scenario",
+    ])
+    assert validation_scenarios == {
+        "high_noise",
+        "signal_loss",
+        "sharp_jump",
+    }
+    assert test_scenarios == {
+        "slow_overheating",
+        "sensor_drift",
+        "stuck_sensor",
+        "correlated_growth",
+    }
+    assert validation_scenarios | test_scenarios == ANOMALY_SCENARIOS
+
+    key_sets = [
+        set(zip(part["sensor_id"], part["timestamp"]))
+        for part in (train_df, validation_df, test_df)
+    ]
+    assert key_sets[0].isdisjoint(key_sets[1])
+    assert key_sets[0].isdisjoint(key_sets[2])
+    assert key_sets[1].isdisjoint(key_sets[2])
 
 
-def test_custom_time_split_changes_sizes_predictably(
+def test_custom_three_way_split_changes_sizes_predictably(
     preprocessed_full_synth,
 ):
-    custom_start = "2026-06-06 13:00:00"
-    train_df, evaluation_df, _x_train, _x_evaluation, info = (
-        train_model.split_train_evaluation(
-            preprocessed_full_synth,
-            test_start=custom_start,
-        )
+    result = train_model.split_train_validation_test(
+        preprocessed_full_synth,
+        validation_start="2026-06-06 13:00:00",
+        test_start="2026-06-06 15:00:00",
     )
+    train_df, validation_df, test_df, *_features, info = result
 
-    assert info["test_start"] == "2026-06-06T13:00:00"
-    assert info["train_rows"] == 360
-    assert info["evaluation_rows"] == 2520
-    assert len(train_df) == 360
-    assert len(evaluation_df) == 2520
-    assert (train_df["timestamp"] < pd.Timestamp(custom_start)).all()
-    assert (evaluation_df["timestamp"] >= pd.Timestamp(custom_start)).all()
+    assert info["validation_start"] == "2026-06-06T13:00:00"
+    assert info["test_start"] == "2026-06-06T15:00:00"
+    assert len(train_df) == info["train_rows"] == 360
+    assert len(validation_df) == info["validation_rows"] == 720
+    assert len(test_df) == info["test_rows"] == 1800
 
 
 @pytest.mark.parametrize(
-    "test_start",
+    ("name", "value"),
     [
-        "not-a-date",
-        "2026-06-06",
-        "2026-06-06T14:00:00",
-        "2026-6-6 14:00:00",
-        None,
+        ("validation_start", "not-a-date"),
+        ("validation_start", "2026-06-06"),
+        ("test_start", "2026-06-06T16:00:00"),
+        ("test_start", "2026-6-6 16:00:00"),
+        ("test_start", None),
     ],
 )
-def test_invalid_time_split_boundary_is_rejected(
+def test_invalid_split_boundary_format_is_rejected(
     preprocessed_full_synth,
-    test_start,
+    name,
+    value,
 ):
+    kwargs = {name: value}
     with pytest.raises(
         ValueError,
-        match="test_start.*YYYY-MM-DD HH:MM:SS",
+        match=rf"{name}.*YYYY-MM-DD HH:MM:SS",
     ):
-        train_model.split_train_evaluation(
+        train_model.split_train_validation_test(
             preprocessed_full_synth,
-            test_start=test_start,
+            **kwargs,
         )
 
 
-def test_time_split_requires_rows_on_both_sides(
+def test_invalid_split_order_and_empty_parts_are_rejected(
     preprocessed_full_synth,
 ):
     timestamps = pd.to_datetime(preprocessed_full_synth["timestamp"])
-    earliest = timestamps.min().strftime(train_model.TEST_START_FORMAT)
+    earliest = timestamps.min().strftime(train_model.SPLIT_TIME_FORMAT)
     after_latest = (
         timestamps.max() + pd.Timedelta(seconds=1)
-    ).strftime(train_model.TEST_START_FORMAT)
+    ).strftime(train_model.SPLIT_TIME_FORMAT)
 
-    with pytest.raises(ValueError, match="В train нет строк"):
-        train_model.split_train_evaluation(
+    with pytest.raises(ValueError, match="В train нет"):
+        train_model.split_train_validation_test(
             preprocessed_full_synth,
-            test_start=earliest,
+            validation_start=earliest,
         )
-    with pytest.raises(ValueError, match="В evaluation нет строк"):
-        train_model.split_train_evaluation(
+    with pytest.raises(ValueError, match="validation_start.*раньше"):
+        train_model.split_train_validation_test(
+            preprocessed_full_synth,
+            validation_start="2026-06-06 16:00:00",
+            test_start="2026-06-06 16:00:00",
+        )
+    with pytest.raises(ValueError, match="В validation нет"):
+        train_model.split_train_validation_test(
+            preprocessed_full_synth,
+            validation_start="2026-06-06 14:00:01",
+            test_start="2026-06-06 14:00:30",
+        )
+    with pytest.raises(ValueError, match="В test нет"):
+        train_model.split_train_validation_test(
             preprocessed_full_synth,
             test_start=after_latest,
         )
 
 
-def test_metadata_saves_actual_time_split(
+def test_metadata_saves_complete_three_way_split(
     preprocessed_full_synth,
     tmp_path,
 ):
-    custom_start = "2026-06-06 13:00:00"
-    scaler, model, info = train_model.train(
-        preprocessed_full_synth,
-        test_start=custom_start,
-    )
+    scaler, model, info = train_model.train(preprocessed_full_synth)
     train_model.save_model(
         scaler,
         model,
@@ -304,30 +349,51 @@ def test_metadata_saves_actual_time_split(
     metadata = json.loads(
         (tmp_path / "model_meta.json").read_text(encoding="utf-8")
     )
-    assert metadata["test_start"] == "2026-06-06T13:00:00"
-    assert metadata["train_rows"] == 360
-    assert metadata["evaluation_rows"] == 2520
+    for key in (
+        "train_rows",
+        "validation_start",
+        "validation_rows",
+        "validation_normal_rows",
+        "validation_anomaly_rows",
+        "test_start",
+        "test_rows",
+        "test_normal_rows",
+        "test_anomaly_rows",
+    ):
+        assert metadata[key] == info[key]
 
 
-def test_train_cli_accepts_time_split():
-    args = train_model.parse_args(
-        ["--test-start", "2026-06-06 13:00:00"]
+def test_train_cli_accepts_both_split_boundaries():
+    args = train_model.parse_args([
+        "--validation-start",
+        "2026-06-06 13:00:00",
+        "--test-start",
+        "2026-06-06 15:00:00",
+    ])
+
+    assert args.validation_start == "2026-06-06 13:00:00"
+    assert args.test_start == "2026-06-06 15:00:00"
+
+
+def test_three_way_split_is_deterministic(preprocessed_full_synth):
+    first = train_model.split_train_validation_test(
+        preprocessed_full_synth
+    )
+    second = train_model.split_train_validation_test(
+        preprocessed_full_synth
     )
 
-    assert args.test_start == "2026-06-06 13:00:00"
-
-
-def test_time_split_is_deterministic(preprocessed_full_synth):
-    first = train_model.split_train_evaluation(preprocessed_full_synth)
-    second = train_model.split_train_evaluation(preprocessed_full_synth)
-
-    for first_frame, second_frame in zip(first[:4], second[:4]):
+    for first_frame, second_frame in zip(first[:6], second[:6]):
         pd.testing.assert_frame_equal(first_frame, second_frame)
-    assert first[4] == second[4]
+    assert first[6] == second[6]
 
 
-def test_future_values_do_not_change_train_features(preprocessed_synth):
-    prepared_before, X_before = train_model.prepare_features(preprocessed_synth)
+def test_future_test_values_do_not_change_train_or_validation_features(
+    preprocessed_synth,
+):
+    prepared_before, X_before = train_model.prepare_features(
+        preprocessed_synth
+    )
     changed = preprocessed_synth.copy()
     future_mask = pd.to_datetime(changed["timestamp"]) >= pd.Timestamp(
         train_model.TEST_START
@@ -337,30 +403,37 @@ def test_future_values_do_not_change_train_features(preprocessed_synth):
     changed.loc[future_mask, "rolling_mean"] += 1000
 
     prepared_after, X_after = train_model.prepare_features(changed)
-    train_mask = prepared_before["timestamp"] < pd.Timestamp(
+    before_test = prepared_before["timestamp"] < pd.Timestamp(
         train_model.TEST_START
     )
     pd.testing.assert_frame_equal(
-        X_before.loc[train_mask],
-        X_after.loc[train_mask],
+        X_before.loc[before_test],
+        X_after.loc[before_test],
     )
     pd.testing.assert_series_equal(
-        prepared_before.loc[train_mask, "timestamp"],
-        prepared_after.loc[train_mask, "timestamp"],
+        prepared_before.loc[before_test, "timestamp"],
+        prepared_after.loc[before_test, "timestamp"],
     )
 
 
-def test_evaluation_keeps_train_rolling_history(preprocessed_synth):
-    _train_df, evaluation_df, _X_train, X_evaluation, _info = (
-        train_model.split_train_evaluation(preprocessed_synth)
-    )
-    first_evaluation_index = evaluation_df[
-        evaluation_df["sensor_id"] == "T-01"
+def test_validation_keeps_train_rolling_history(preprocessed_synth):
+    (
+        _train_df,
+        validation_df,
+        _test_df,
+        _x_train,
+        X_validation,
+        _x_test,
+        _info,
+    ) = train_model.split_train_validation_test(preprocessed_synth)
+    first_index = validation_df[
+        validation_df["sensor_id"] == "T-01"
     ].index[0]
 
-    _isolated_df, isolated_X = train_model.prepare_features(evaluation_df)
-    full_history_value = X_evaluation.loc[
-        first_evaluation_index, "rolling_temp_diff_mean_20"
+    _isolated_df, isolated_X = train_model.prepare_features(validation_df)
+    full_history_value = X_validation.loc[
+        first_index,
+        "rolling_temp_diff_mean_20",
     ]
     reset_history_value = isolated_X.loc[
         isolated_X["rolling_temp_diff_mean_20"].index[0],
@@ -368,7 +441,6 @@ def test_evaluation_keeps_train_rolling_history(preprocessed_synth):
     ]
 
     assert not np.isclose(full_history_value, reset_history_value)
-
 
 def test_save_load_is_deterministic(preprocessed_synth, tmp_path):
     """Два обучения с одним random_state дают идентичные предсказания."""
@@ -565,9 +637,15 @@ def test_score_normalization_is_independent_of_current_batch():
 
 def test_train_calibration_uses_only_training_baseline(preprocessed_synth):
     scaler, model, info = train_model.train(preprocessed_synth)
-    _train_df, _evaluation_df, X_train, _X_evaluation, _ = (
-        train_model.split_train_evaluation(preprocessed_synth)
-    )
+    (
+        _train_df,
+        _validation_df,
+        _test_df,
+        X_train,
+        _X_validation,
+        _X_test,
+        _info,
+    ) = train_model.split_train_validation_test(preprocessed_synth)
     train_scores = -model.decision_function(scaler.transform(X_train))
     calibration = info["score_calibration"]
 
@@ -747,39 +825,57 @@ def test_inference_does_not_modify_model_artifacts(preprocessed_synth, tmp_path)
     assert hashes_after == hashes_before
 
 
-def test_model_quality_floor(preprocessed_full_synth):
-    """Независимые precision >= 0.66 и F1 >= 0.45 на полном benchmark."""
+def test_model_quality_floor_is_not_weakened_on_final_test(
+    preprocessed_full_synth,
+):
+    """На закрытом test сохраняются precision >= 0.66 и F1 >= 0.45."""
     scaler, model, _ = train_model.train(preprocessed_full_synth)
     report = train_model.evaluate(preprocessed_full_synth, scaler, model)
-    assert report["precision"] >= 0.66, report
-    assert report["f1"] >= 0.45, report
+    final_test = report["test"]
+    assert final_test["precision"] >= 0.66, report
+    assert final_test["f1"] >= 0.45, report
 
 
-def test_evaluate_uses_only_evaluation_rows(preprocessed_synth):
+def test_evaluate_reports_validation_and_uses_test_as_final(
+    preprocessed_synth,
+):
     scaler, model, _ = train_model.train(preprocessed_synth)
-    _train_df, evaluation_df, _X_train, X_evaluation, info = (
-        train_model.split_train_evaluation(preprocessed_synth)
-    )
+    (
+        _train_df,
+        validation_df,
+        test_df,
+        _x_train,
+        X_validation,
+        X_test,
+        split_info,
+    ) = train_model.split_train_validation_test(preprocessed_synth)
     report = train_model.evaluate(preprocessed_synth, scaler, model)
 
-    expected_pred = pd.Series(0, index=evaluation_df.index, dtype=int)
-    expected_pred.loc[X_evaluation.index] = (
-        model.predict(scaler.transform(X_evaluation)) == -1
-    ).astype(int)
-    expected_gt = (evaluation_df["scenario"] != "normal").astype(int)
-    assert report["iforest_anomalies"] == int(expected_pred.sum())
-    assert report["tp"] == int(((expected_pred == 1) & (expected_gt == 1)).sum())
-    assert report["fp"] == int(((expected_pred == 1) & (expected_gt == 0)).sum())
-    assert report["fn"] == int(((expected_pred == 0) & (expected_gt == 1)).sum())
-    for key in (
-        "train_rows",
-        "evaluation_rows",
-        "evaluation_normal_rows",
-        "evaluation_anomaly_rows",
-        "split_strategy",
-        "test_start",
+    for name, frame, features in (
+        ("validation", validation_df, X_validation),
+        ("test", test_df, X_test),
     ):
-        assert report[key] == info[key]
+        expected_pred = pd.Series(0, index=frame.index, dtype=int)
+        expected_pred.loc[features.index] = (
+            model.predict(scaler.transform(features)) == -1
+        ).astype(int)
+        expected_gt = (frame["scenario"] != "normal").astype(int)
+        partition_report = report[name]
+        assert partition_report["iforest_anomalies"] == int(
+            expected_pred.sum()
+        )
+        assert partition_report["tp"] == int(
+            ((expected_pred == 1) & (expected_gt == 1)).sum()
+        )
+        assert partition_report["fp"] == int(
+            ((expected_pred == 1) & (expected_gt == 0)).sum()
+        )
+        assert partition_report["fn"] == int(
+            ((expected_pred == 0) & (expected_gt == 1)).sum()
+        )
+
+    assert report["split"] == split_info
+    assert report["final_report_dataset"] == "test"
 
 
 def test_meta_json_written(preprocessed_synth, tmp_path):
@@ -801,10 +897,14 @@ def test_meta_json_written(preprocessed_synth, tmp_path):
         "train_rows",
         "trained_on_normal",
         "split_strategy",
+        "validation_start",
+        "validation_rows",
+        "validation_normal_rows",
+        "validation_anomaly_rows",
         "test_start",
-        "evaluation_rows",
-        "evaluation_normal_rows",
-        "evaluation_anomaly_rows",
+        "test_rows",
+        "test_normal_rows",
+        "test_anomaly_rows",
         "score_calibration",
     }
     assert expected_fields.issubset(meta)

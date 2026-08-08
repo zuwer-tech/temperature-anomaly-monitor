@@ -26,14 +26,23 @@ def _metrics(pred, gt):
 
 
 def _full_pipeline(preprocessed_synth, tmp_path):
-    """Обучает модель и возвращает позднюю evaluation-часть пайплайна."""
+    """Возвращает весь post-train holdout для регрессии правил."""
     scaler, model, info = train_model.train(preprocessed_synth)
     train_model.save_model(scaler, model, info, model_dir=str(tmp_path))
-    results, _alarm = detect_anomalies(preprocessed_synth, model_dir=str(tmp_path))
-    _train, evaluation, _X_train, _X_evaluation, _split_info = (
-        train_model.split_train_evaluation(results)
+    results, _alarm = detect_anomalies(
+        preprocessed_synth,
+        model_dir=str(tmp_path),
     )
-    return evaluation
+    (
+        _train,
+        validation,
+        test,
+        _x_train,
+        _x_validation,
+        _x_test,
+        _split_info,
+    ) = train_model.split_train_validation_test(results)
+    return pd.concat([validation, test]).sort_index()
 
 
 def test_rule_params_present():

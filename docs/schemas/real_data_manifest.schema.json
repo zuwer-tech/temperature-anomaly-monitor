@@ -74,15 +74,30 @@
     "expert_labeling": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["labeler_role", "labeling_date", "review_status", "guidance"],
+      "required": [
+        "labeler_role",
+        "labeling_date",
+        "review_status",
+        "guidance",
+        "coverage",
+        "unlabeled_policy"
+      ],
       "properties": {
         "labeler_role": {"type": "string", "minLength": 1},
         "labeling_date": {"type": "string", "format": "date"},
         "review_status": {
           "enum": ["not_reviewed", "single_expert", "second_expert_consensus"]
         },
-        "guidance": {"type": "string", "minLength": 1}
-      }
+        "guidance": {"type": "string", "minLength": 1},
+        "coverage": {
+          "enum": ["full_timeline", "event_only", "partial"]
+        },
+        "unlabeled_policy": {
+          "enum": [
+            "unknown_exclude_from_metrics",
+            "confirmed_normal_outside_events"
+          ]
+        }      }
     },
     "data_quality": {
       "type": "object",

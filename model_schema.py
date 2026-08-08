@@ -28,7 +28,7 @@ SCORE_CALIBRATION_METHOD = "training_baseline_min_max"
 RISK_MEDIUM_THRESHOLD = 0.60
 RISK_HIGH_THRESHOLD = 0.85
 
-METADATA_VERSION = 3
+METADATA_VERSION = 4
 
 
 def prepare_ml_features(df):
